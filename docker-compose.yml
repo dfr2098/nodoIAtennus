@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: test
+      MYSQL_USER: tennus01
+      MYSQL_PASSWORD: sulaco987Q_Q
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      tennus_net:
+        ipv4_address: 172.20.0.2
+
+  anaconda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - ./notebooks:/notebooks
+      - ./nodo:/nodo  # Monta la carpeta 'nodo' en '/nodo' dentro del contenedor
+    ports:
+      - "8888:8888"
+    depends_on:
+      - mysql
+    networks:
+      tennus_net:
+        ipv4_address: 172.20.0.3
+
+  mongodb:
+    image: mongo:4.4
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      tennus_net:
+        ipv4_address: 172.20.0.4
+
+networks:
+  tennus_net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mysql_data:
+  mongodb_data:
