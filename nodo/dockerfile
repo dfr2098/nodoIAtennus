@@ -1,0 +1,23 @@
+# Usa la imagen base de Anaconda
+FROM continuumio/anaconda3:latest
+
+# Copia el archivo requirements.txt a la imagen
+COPY requirements.txt /tmp/
+
+# Instala las dependencias especificadas en requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Establece el directorio de trabajo en /nodo
+WORKDIR /nodo
+
+# Copia el contenido de la carpeta 'nodo' al directorio '/nodo' dentro del contenedor
+COPY nodo /nodo
+
+# Define la variable de entorno PATH para que Anaconda pueda encontrar los ejecutables instalados
+ENV PATH="/opt/conda/bin:${PATH}"
+
+# Exponer el puerto utilizado por tu aplicación (si es necesario)
+EXPOSE 8888
+
+# Comando para iniciar tu aplicación (si es necesario)
+CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--port=8888", "--allow-root"]
