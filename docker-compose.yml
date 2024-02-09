@@ -44,8 +44,8 @@ services:
     image: mongo:4.4
     restart: always
     environment:
-      MONGO_INITDB_ROOT_USERNAME: dfr209811
-      MONGO_INITDB_ROOT_PASSWORD: nostromo987Q_Q
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
       MONGO_INITDB_DATABASE: tennus_data_analitica
     ports:
       - "27017:27017"
