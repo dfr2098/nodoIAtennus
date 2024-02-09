@@ -15,7 +15,7 @@ services:
       - mysql_data:/var/lib/mysql
     networks:
       tennus_net:
-        ipv4_address: 172.21.0.2
+        ipv4_address: 172.45.0.2
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 30s
@@ -37,7 +37,7 @@ services:
       - mongodb
     networks:
       tennus_net:
-        ipv4_address: 172.21.0.3
+        ipv4_address: 172.45.0.3
 
   mongodb:
     image: mongo:4.4
@@ -51,7 +51,7 @@ services:
       - mongodb_data:/data/db
     networks:
       tennus_net:
-        ipv4_address: 172.21.0.4
+        ipv4_address: 172.45.0.4
     healthcheck:
       test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -64,7 +64,7 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 172.21.0.0/16
+        - subnet: 172.45.0.0/16
 
 volumes:
   mysql_data:
