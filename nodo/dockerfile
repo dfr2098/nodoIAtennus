@@ -1,15 +1,18 @@
 # Usa una versión específica de la imagen base de Anaconda
 FROM continuumio/anaconda3:2020.11
 
+# Actualiza los paquetes e instala supervisor
+# Actualiza los paquetes e instala supervisor
+RUN apt-get update --allow-releaseinfo-change && apt-get install -y supervisor
+
 # Establece el directorio de trabajo en /nodo
 WORKDIR /nodo
 
-# Copia el contenido de la carpeta 'nodo' y el archivo requirements.txt al directorio '/nodo' dentro del contenedor
-COPY nodo .
-COPY requirements.txt .
+# Copia el contenido del directorio actual al directorio '/nodo' dentro del contenedor
+COPY . .
 
-# Instala las dependencias especificadas en requirements.txt y limpia la caché de pip
-RUN pip install --no-cache-dir -r requirements.txt
+# Instala las dependencias especificadas en requirements.txt
+RUN conda install -c conda-forge --file requirements.txt
 
 # Define la variable de entorno PATH para que Anaconda pueda encontrar los ejecutables instalados
 ENV PATH="/opt/conda/bin:${PATH}"
@@ -18,8 +21,11 @@ ENV PATH="/opt/conda/bin:${PATH}"
 RUN useradd -ms /bin/bash jupyteruser
 USER jupyteruser
 
-# Exponer el puerto utilizado por tu aplicación
-EXPOSE 8888
+# Exponer los puertos utilizados por tu aplicación y Jupyter
+EXPOSE 80 8888
 
-# Comando para iniciar tu aplicación
-CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--port=8888"]
+# Copia el archivo de configuración de supervisord a tu contenedor
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Configura supervisord como el comando para iniciar tu contenedor
+CMD ["/usr/bin/supervisord"]
