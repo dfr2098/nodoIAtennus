@@ -32,6 +32,7 @@ services:
       - ./nodo:/nodo
     ports:
       - "8888:8888"
+      - "80"
     depends_on:
       - mysql
       - mongodb
