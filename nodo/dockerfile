@@ -12,7 +12,14 @@ WORKDIR /nodo
 COPY . .
 
 # Instala las dependencias especificadas en requirements.txt
-RUN conda install -c conda-forge --file requirements.txt
+# Instala las dependencias especificadas en requirements.txt con conda
+RUN conda install --file requirements.txt || true
+
+# Instala pip
+RUN conda install pip
+
+# Usa pip para instalar cualquier dependencia que conda no pudo encontrar
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Define la variable de entorno PATH para que Anaconda pueda encontrar los ejecutables instalados
 ENV PATH="/opt/conda/bin:${PATH}"
