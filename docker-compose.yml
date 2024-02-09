@@ -5,10 +5,10 @@ services:
     image: mysql:8.0
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: test
-      MYSQL_USER: tennus01
-      MYSQL_PASSWORD: sulaco987Q_Q
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
@@ -16,6 +16,11 @@ services:
     networks:
       tennus_net:
         ipv4_address: 172.20.0.2
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   anaconda:
     build:
@@ -24,11 +29,12 @@ services:
     restart: always
     volumes:
       - ./notebooks:/notebooks
-      - ./nodo:/nodo  # Monta la carpeta 'nodo' en '/nodo' dentro del contenedor
+      - ./nodo:/nodo
     ports:
       - "8888:8888"
     depends_on:
       - mysql
+      - mongodb
     networks:
       tennus_net:
         ipv4_address: 172.20.0.3
@@ -36,6 +42,9 @@ services:
   mongodb:
     image: mongo:4.4
     restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
     ports:
       - "27017:27017"
     volumes:
@@ -43,6 +52,11 @@ services:
     networks:
       tennus_net:
         ipv4_address: 172.20.0.4
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   tennus_net:
