@@ -187,3 +187,62 @@
 2024-02-16 05:23:12,851 INFO spawned: 'fastapi' with pid 17
 2024-02-16 05:23:13,197 INFO exited: fastapi (exit status 1; not expected)
 2024-02-16 05:23:14,199 INFO gave up: fastapi entered FATAL state, too many start retries too quickly
+2024-02-16 05:38:50,346 WARN received SIGTERM indicating exit request
+2024-02-16 05:38:50,347 INFO waiting for jupyter to die
+2024-02-16 05:38:50,508 INFO stopped: jupyter (exit status 0)
+2024-02-16 05:40:22,845 INFO supervisord started with pid 1
+2024-02-16 05:40:23,849 INFO spawned: 'fastapi' with pid 9
+2024-02-16 05:40:23,853 INFO spawned: 'jupyter' with pid 10
+2024-02-16 05:40:24,268 INFO exited: fastapi (exit status 1; not expected)
+2024-02-16 05:40:25,839 INFO spawned: 'fastapi' with pid 13
+2024-02-16 05:40:25,840 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:40:26,185 INFO exited: fastapi (exit status 1; not expected)
+2024-02-16 05:40:28,190 INFO spawned: 'fastapi' with pid 15
+2024-02-16 05:40:28,538 INFO exited: fastapi (exit status 1; not expected)
+2024-02-16 05:40:31,544 INFO spawned: 'fastapi' with pid 17
+2024-02-16 05:40:31,906 INFO exited: fastapi (exit status 1; not expected)
+2024-02-16 05:40:32,907 INFO gave up: fastapi entered FATAL state, too many start retries too quickly
+2024-02-16 05:43:22,913 WARN received SIGTERM indicating exit request
+2024-02-16 05:43:22,913 INFO waiting for jupyter to die
+2024-02-16 05:43:23,044 INFO stopped: jupyter (exit status 0)
+2024-02-16 05:45:12,216 INFO supervisord started with pid 1
+2024-02-16 05:45:13,219 INFO spawned: 'fastapi' with pid 9
+2024-02-16 05:45:13,222 INFO spawned: 'jupyter' with pid 10
+2024-02-16 05:45:15,007 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:45:15,008 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:49:32,425 WARN received SIGTERM indicating exit request
+2024-02-16 05:49:32,426 INFO waiting for fastapi, jupyter to die
+2024-02-16 05:49:32,566 INFO stopped: jupyter (exit status 0)
+2024-02-16 05:49:32,817 INFO stopped: fastapi (exit status 0)
+2024-02-16 05:52:25,838 INFO supervisord started with pid 1
+2024-02-16 05:52:26,841 INFO spawned: 'fastapi' with pid 9
+2024-02-16 05:52:26,843 INFO spawned: 'jupyter' with pid 10
+2024-02-16 05:52:28,041 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:52:28,041 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:53:29,020 WARN received SIGTERM indicating exit request
+2024-02-16 05:53:29,021 INFO waiting for fastapi, jupyter to die
+2024-02-16 05:53:29,159 INFO stopped: jupyter (exit status 0)
+2024-02-16 05:53:29,383 INFO stopped: fastapi (exit status 0)
+2024-02-16 05:53:36,158 INFO supervisord started with pid 1
+2024-02-16 05:53:37,161 INFO spawned: 'fastapi' with pid 9
+2024-02-16 05:53:37,163 INFO spawned: 'jupyter' with pid 10
+2024-02-16 05:53:38,933 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:53:38,933 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:57:51,942 WARN received SIGTERM indicating exit request
+2024-02-16 05:57:51,942 INFO waiting for fastapi, jupyter to die
+2024-02-16 05:57:52,104 INFO stopped: jupyter (exit status 0)
+2024-02-16 05:57:52,261 INFO stopped: fastapi (exit status 0)
+2024-02-16 05:57:59,143 INFO supervisord started with pid 1
+2024-02-16 05:58:00,146 INFO spawned: 'fastapi' with pid 9
+2024-02-16 05:58:00,149 INFO spawned: 'jupyter' with pid 10
+2024-02-16 05:58:02,065 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 05:58:02,065 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 06:00:49,332 WARN received SIGTERM indicating exit request
+2024-02-16 06:00:49,333 INFO waiting for fastapi, jupyter to die
+2024-02-16 06:00:49,483 INFO stopped: jupyter (exit status 0)
+2024-02-16 06:00:49,727 INFO stopped: fastapi (exit status 0)
+2024-02-16 06:03:22,590 INFO supervisord started with pid 1
+2024-02-16 06:03:23,593 INFO spawned: 'fastapi' with pid 8
+2024-02-16 06:03:23,595 INFO spawned: 'jupyter' with pid 9
+2024-02-16 06:03:25,270 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-02-16 06:03:25,270 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)

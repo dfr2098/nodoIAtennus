@@ -11,7 +11,7 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - ./mysql_data:/var/lib/mysql
     networks:
@@ -32,8 +32,8 @@ services:
       - ./notebooks:/notebooks
       - ./nodo:/nodo
     ports:
-      - "8888:8888"
-      - "80:80"
+      - "8889:8888"
+      - "8082:80"
     depends_on:
       - mysql
       - mongodb
@@ -49,7 +49,7 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
       MONGO_INITDB_DATABASE: tennus_data_analitica
     ports:
-      - "27017:27017"
+      - "27018:27017"
     volumes:
       - ./mongodb_data:/data/db
     networks:
@@ -65,7 +65,7 @@ services:
     image: phpmyadmin/phpmyadmin
     restart: always
     ports:
-      - "8080:80"
+      - "8081:80"
     environment:
       PMA_HOST: mysql
       PMA_USER: ${MYSQL_USER}
@@ -73,9 +73,25 @@ services:
       PMA_ARBITRARY: 1
     networks:
       tennus_net:
-        ipv4_address: 172.45.0.8
+        ipv4_address: 172.45.0.5
     depends_on:
       - mysql
+  
+  mongo-express:
+    image: mongo-express
+    restart: always
+    ports:
+      - "8083:8081"
+    environment:
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "false"
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      ME_CONFIG_MONGODB_SERVER: mongodb
+    networks:
+      tennus_net:
+        ipv4_address: 172.45.0.6
+    depends_on:
+      - mongodb
 
 networks:
   tennus_net:
