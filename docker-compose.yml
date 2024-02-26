@@ -83,9 +83,10 @@ services:
     ports:
       - "8083:8081"
     environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME}
-      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
-      ME_CONFIG_MONGODB_SERVER: mongodb
+     ME_CONFIG_MONGODB_SERVER: mongodb
+    volumes:
+    - ./start-mongo-express.sh:/start-mongo-express.sh
+    command: ["/bin/bash", "/start-mongo-express.sh"]
     networks:
       tennus_net:
         ipv4_address: 172.45.0.6
