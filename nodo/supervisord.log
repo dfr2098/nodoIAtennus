@@ -400,3 +400,8 @@
 2024-03-20 06:10:01,541 INFO spawned: 'jupyter' with pid 9
 2024-03-20 06:10:02,548 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
 2024-03-20 06:10:02,550 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 06:35:27,502 CRIT could not write pidfile /nodo/supervisord.pid
+2024-03-20 06:35:28,575 INFO spawned: 'fastapi' with pid 9
+2024-03-20 06:35:28,599 INFO spawned: 'jupyter' with pid 10
+2024-03-20 06:35:29,663 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 06:35:29,667 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
