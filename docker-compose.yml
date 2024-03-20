@@ -3,7 +3,7 @@ version: '3.8'
 services:
   mysql:
     image: mysql:8.0
-    command: --default-authentication-plugin=mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password --host-cache-size=0 --lower_case_table_names=2
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -14,6 +14,7 @@ services:
       - "3307:3306"
     volumes:
       - ./mysql_data:/var/lib/mysql
+      - ./my-custom.cnf:/etc/mysql/conf.d/my-custom.cnf
     networks:
       tennus_net:
         ipv4_address: 172.45.0.2
@@ -66,11 +67,6 @@ services:
     restart: always
     ports:
       - "8081:80"
-    environment:
-      PMA_HOST: mysql
-      PMA_USER: ${MYSQL_USER}
-      PMA_PASSWORD: ${MYSQL_PASSWORD}
-      PMA_ARBITRARY: 1
     networks:
       tennus_net:
         ipv4_address: 172.45.0.5

@@ -405,3 +405,26 @@
 2024-03-20 06:35:28,599 INFO spawned: 'jupyter' with pid 10
 2024-03-20 06:35:29,663 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
 2024-03-20 06:35:29,667 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 18:26:38,437 INFO supervisord started with pid 1
+2024-03-20 18:26:39,442 INFO spawned: 'fastapi' with pid 8
+2024-03-20 18:26:39,468 INFO spawned: 'jupyter' with pid 9
+2024-03-20 18:26:40,504 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 18:26:40,505 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 18:26:56,137 WARN received SIGTERM indicating exit request
+2024-03-20 18:26:56,141 INFO waiting for fastapi, jupyter to die
+2024-03-20 18:26:56,868 INFO stopped: jupyter (exit status 0)
+2024-03-20 18:26:57,243 INFO stopped: fastapi (exit status 0)
+2024-03-20 22:27:34,831 INFO supervisord started with pid 1
+2024-03-20 22:27:35,838 INFO spawned: 'fastapi' with pid 9
+2024-03-20 22:27:35,842 INFO spawned: 'jupyter' with pid 10
+2024-03-20 22:27:36,854 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 22:27:36,866 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 22:33:16,180 WARN received SIGTERM indicating exit request
+2024-03-20 22:33:16,223 INFO waiting for fastapi, jupyter to die
+2024-03-20 22:33:17,311 INFO stopped: jupyter (exit status 0)
+2024-03-20 22:33:17,729 INFO stopped: fastapi (exit status 0)
+2024-03-20 22:42:41,365 INFO supervisord started with pid 1
+2024-03-20 22:42:42,403 INFO spawned: 'fastapi' with pid 9
+2024-03-20 22:42:42,455 INFO spawned: 'jupyter' with pid 10
+2024-03-20 22:42:43,483 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-03-20 22:42:43,497 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
