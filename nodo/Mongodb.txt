@@ -1,0 +1,77 @@
+# Conexión a la base de datos
+client = MongoClient("localhost", 27017)
+
+# Crear una base de datos, para la conversacion -> conversacion.json
+db = client["conversacion_db"] 
+
+# Crear una colección
+collection = db["chat_mensajes"]
+
+#Crear coleccion para la conversación
+conversacion_collection = db["usuario"]
+
+# Crear colecciones
+cotizaciones_collection = db["cotizacion"]
+devoluciones_collection = db["devolucion"]
+quejas_collection = db["queja"]
+entrega_resultados_collection = db["resultados"]
+
+# Insertar un JSON en la colección
+collection.insert_one(usuario)
+
+# Insertar JSON en las colecciones
+cotizaciones_collection.insert_one(cotizacion)
+devoluciones_collection.insert_one(devolucion)
+quejas_collection.insert_one(queja)
+entrega_resultados_collection.insert_one(resultados)
+
+# Crear una base de datos, para servicios -> servicios.json
+dbServicios = client["servicios_db"] 
+
+# Crear colecciones
+membresia_collection = dbServicios["membresia"]
+miembros_collection = dbServicios["miembros"]
+pagos_collection = dbServicios["pagos"]
+servicios_collection = dbServicios["servicios"]
+paquetes_collection = dbServicios["paquetes"]
+monedero_collection = dbServicios["monedero"]
+transacciones_collection = dbServicios["transacciones"]
+historial_collection = dbServicios["historial"]
+
+# Insertar JSON en las colecciones
+membresia_collection.insert_one("membresia")
+miembros_collection.insert_one("miembros")
+pagos_collection.insert_one("pagos")
+servicios_collection.insert_one("servicios")
+paquetes_collection.insert_one("paquetes")
+monedero_collection.insert_one("monedero")
+transacciones_collection.insert_one("transacciones")
+historial_collection.insert_one("historial")
+
+# Crear una base de datos, para chatbot -> chatbot.json
+dbChatbot = client["chatbot_db"] 
+
+# Crear colecciones
+usuario_collection = dbChatbot["usuario"]
+conversacion_collection = dbChatbot["tag","patrones","respuestas"]
+
+# Crear una base de datos, para admins -> admins.json
+dbAdmins = client["admins_db"] 
+
+# Crear colecciones
+admin_collection = dbAdmins["admin"]
+historial_collection = dbAdmins["historial"]
+
+
+# Consultar los documentos almacenados en cada colección
+cursor_devoluciones = devoluciones_collection.find({})
+for document in cursor_devoluciones:
+  print(document)
+
+cursor_quejas = quejas_collection.find({})
+for document in cursor_quejas:
+  print(document)
+
+cursor_entrega_resultados = entrega_resultados_collection.find({})
+for document in cursor_entrega_resultados:
+  print(document)

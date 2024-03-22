@@ -1,0 +1,29 @@
+
+CREATE TABLE clientes (
+  id INT NOT NULL AUTO_INCREMENT,
+  nombre_usuario VARCHAR(255) NOT NULL,
+  correo VARCHAR(255) NOT NULL,
+  contrasena VARCHAR(255) NOT NULL,
+  dispoitivo VARCHAR(20) NOT NULL,
+  ip_usuario INT(20) NOT NULL,
+  tipo_usuario VARCHAR(20) NOT NULL,
+  PRIMARY KEY (id)
+);
+
+CREATE TABLE admins (
+  id INT NOT NULL AUTO_INCREMENT,
+  nombre_admin VARCHAR(255) NOT NULL,
+  correo VARCHAR(255) NOT NULL,
+  contrasena VARCHAR(20) NOT NULL,
+  depto VARCHAR(20) NOT NULL,
+  PRIMARY KEY (id)
+);
+
+--importar la BD de servicios
+
+mysqldump -u root -p servicios membresias miembros pagos_miembresia Servicios Paquetes_adquiridos 
+Monedero_electronico Transacciones Historial_tras > archivo.sql
+
+
+--Importar las tablas:
+mysql -u root -p Usuarios < archivo.sql

@@ -1,0 +1,51 @@
+{ "Usuario":[
+    {
+      "usuario_id":"",
+      "nombre_usuario":"",
+      "mensaje":"",
+      "fecha_t":"",
+      "dispositivo":"",
+      "ip_usuario":"",
+      "tipo_usuario":"",
+      "peticion_menu":""
+    }
+],
+"Cotizacion":[
+    {
+        "usuario_id":"",
+        "servicio":"",
+        "ubicacion":"",
+        "fecha":"",
+        "estimado":""
+    }
+],
+"Devolucion":[
+    {
+        "id_producto":"",
+        "usuario_id":"",
+        "nombre_usuario":"",
+        "producto":"",
+        "motivo":"",
+        "fecha_compra":""
+    }
+],
+"Resultados":[
+    {
+        "id_estudio":"",
+        "usuario_id":"",
+        "nombre_usuario":"",
+        "tipo_estudio":"",
+        "resultado": [],
+        "fecha_estudio":""
+    }
+],
+"Queja":[
+    {
+        "usuario_id":"",
+        "tipo":"",
+        "comentario":"",
+        "tipo_servicio":""
+    }
+]
+
+}

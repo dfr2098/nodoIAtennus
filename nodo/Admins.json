@@ -1,0 +1,18 @@
+{  "Admin":[
+    {
+        "admin_id":"",
+        "admin_usuario":"",
+        "email":"",
+        "contrasena":"",
+        "depto":""
+    }
+],
+"Historial":[
+    {
+        "fecha":"",
+        "edicion":[],
+        "tipo":""
+    }
+]
+
+}

@@ -1,0 +1,78 @@
+{ "Membresia":[
+    {
+        "id_membresia":"",
+        "nombre": "",
+        "tipo":"",
+        "num":"",
+        "fechal":"",
+        "fechaExpiracion":"",
+        "tarifa":"",
+        "estado":""
+    }
+
+],
+"Miembros":[
+    {
+        "id_usuario":"",
+        "id_membresia":"",
+        "nombre":"",
+        "apellido":"",
+        "e-mail":"",
+        "teléfono":"",
+        "dirección":""
+    }
+],
+"Pagos_miembresia":[
+    {
+        "id_pago":"",
+        "id_membresia":"",
+        "fecha_pago":"",
+        "monto_pago":"",
+        "Metodo_pago":""
+    }
+],
+"Servicios":[
+    {
+        "id_servicios":"",
+        "Nombre":"",
+        "Descripcion":"",
+        "Precio":"",
+        "DuracionH":""
+    }
+],
+"Paquetes_adquiridos":[
+    {
+        "id_paquete":"",
+        "id_cliente":"",
+        "Fechadecompra":""
+    }
+],
+"Monedero_electronico":[
+    {
+        "id_monedero":"",
+        "id_usuario":""
+    }
+],
+"Transacciones":[
+    {
+        "id_transaccion":"",
+        "id_monedero_origen":"",
+        "id_monedero_destino":"",
+        "monto":"",
+        "fecha de transaccion":"",
+        "tipo de transaccion":"",
+        "estado de la transaccion":""
+    }
+],
+"Historial_tras":[
+    {
+        "id_historial":"",
+        "id_monedero":"",
+        "id_transaccion":"",
+        "saldo previo":"",
+        "saldo posterior":"",
+        "date transaccion":""
+    }
+]
+
+}

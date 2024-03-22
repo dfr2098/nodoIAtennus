@@ -1,0 +1,55 @@
+{ "Usuario":[
+    {
+      "usuario_id":"",
+      "nombre_usuario":"",
+      "mensaje":"",
+      "fecha_t":"",
+      "dispositivo":"",
+      "ip_usuario":"",
+      "tipo_usuario":"",
+      "peticion_menu":""
+    }
+],
+"conversación":[
+    {
+        "tag": "menu",
+        "patrones": ["que puedes hacer?", "puedes ayudarme en algo?","cuales son los servicios que ofreces"],
+        "respuestas": ["Puedo realizar diferentes acciones como: informe de servicios, informe de resultados, levantar una queja o sugerencia,o realizar una cotización o devolución ", "Puedo platicar con usted, además de ofrecerle los distintos servicios con los que contamos"]
+    },
+    {
+        "tag": "saludo",
+        "patrones": ["hola", "qué tal", "cómo estás", "saludos"],
+        "respuestas": ["¡Hola!", "¡Buenos días!", "¿Cómo está?"]
+    },
+    {
+        "tag": "nombre",
+        "patrones": ["cómo es tu nombre", "cómo te llamas"],
+        "respuestas": ["Me llamo Aistente", "Mi nombre es Asistente"]
+    },
+    {
+        "tag": "cotizacion",
+        "patrones": ["puedo saber el precio del servicio?", "cuál es el precio del estudio?"],
+        "respuestas": ["¡Por supuesto! necesito conocer algunos datos de usted antes", "¡Claro que sí! necesito que me proporcione algunos datos"]
+    },
+    {
+        "tag": "devolucion",
+        "patrones": ["quiero regresar un producto", "necesito la devolución de la vacuna"],
+        "respuestas": ["Necesito determinar si aplica la devolución", "Debo consultar si la devolución puede realizarse"]
+    },
+    {
+        "tag": "resultados",
+        "patrones": ["necesito checar mis estudios", "puedes entregarme unos resultados?"],
+        "respuestas": ["¡Será todo un placer antenderle! necesito que me proporcione el folio de su estudio", "Solamente necesito que me proporcione el número de folio referente a lo que desea consultar"]
+    },
+    {
+        "tag": "queja",
+        "patrones": ["tengo una sugerencia", "tengo una queja"],
+        "respuestas": ["Puede realizarla conmigo, y la entregaré a la brevedad", "¿Cuál es la sugerencia que quisiera mencionar?", "Cuál es la queja que quisiera decir?"]
+    },
+    {
+        "tag": "asesor_externo",
+        "patrones": ["quiero hablar con alguien real", "puedo hablar con un humano?"],
+        "respuestas": ["Puedo enlazarlo con un asesor externo a mi", "¡Claro! necesito realizar la petición para hacer el enlace"]
+    }
+]
+}
