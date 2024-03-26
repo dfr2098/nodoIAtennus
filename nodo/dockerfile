@@ -34,7 +34,5 @@ EXPOSE 80 8888
 # Copia el archivo de configuración de supervisord a tu contenedor
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-
-
 # Configura supervisord como el comando para iniciar tu contenedor
 CMD ["/usr/bin/supervisord"]
