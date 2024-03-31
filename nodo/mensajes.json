@@ -1,0 +1,14 @@
+[
+    {
+        "id": "1",
+        "nombre": "Alice",
+        "contenido": "Hola, ¿cómo estás?",
+        "timestamp": "2024-03-28 10:30:00"
+    },
+    {
+        "id": "2",
+        "nombre": "Bob",
+        "contenido": "¡Hola! Estoy bien, y tú?",
+        "timestamp": "2024-03-28 10:35:00"
+    }
+]
