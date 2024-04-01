@@ -5,8 +5,18 @@ from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
+from pymongo import MongoClient
+from bson import ObjectId
 
 app = FastAPI()
+
+
+# Conectarse a MongoDB
+cliente = MongoClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')  
+# Acceder a la base de datos y la colección MongoDB
+bd = cliente['tennus_data_analitica']  
+coleccion = bd['Mensajes']  
+
 
 # Configurar el productor de Kafka
 productor = KafkaProducer(bootstrap_servers='localhost:9092',
@@ -72,13 +82,21 @@ def Enviar_y_restaurar(nombre, contenido):
         print("Mensaje almacenado en el archivo JSON.")
     except Exception as e:
         print("Error al almacenar el mensaje en el archivo JSON:", e)
+        
+    try:
+        # Guardar el mensaje en MongoDB
+        coleccion.insert_one(mensaje)
+        print("Mensaje almacenado en MongoDB.")
+    except Exception as e:
+        print("Error al almacenar el mensaje en MongoDB:", e)  
+        
 
 # Función para procesar un mensaje recibido
 def procesar_mensaje(mensaje):
     print("Mensaje recibido:", mensaje)
     # procesar el mensaje 
-
-# Función para obtener mensajes del archivo JSON    
+"""
+# Función para obtener mensajes del archivo JSON   No se usan  
 def obtener_mensajes():
     mensajes = []
     try:
@@ -93,6 +111,20 @@ def obtener_mensajes():
     except Exception as e:
         print("Error al obtener mensajes del archivo JSON:", e)
     return mensajes
+
+# Función para obtener mensajes de la colección de MongoDB
+def obtener_mensajes_mongo(coleccion):
+    mensajes = []
+    try:
+        # Obtener todos los documentos de la colección
+        documentos = coleccion.find()
+        # Recorrer los documentos y agregar los mensajes a la lista
+        for documento in documentos:
+            mensajes.append(documento)
+    except Exception as e:
+        print("Error al obtener mensajes de MongoDB:", e)
+    return mensajes
+"""
 
 # Función de tarea de fondo para recibir mensajes de Kafka en segundo plano
 def kafka_tarea_consumidor():
@@ -112,6 +144,29 @@ def leer_mensajes_archivo(file_path):
     mensajes = json.loads(info)
     return mensajes
 
+#Función para leer los archivos de MongoDB
+def leer_mensajes_coleccion(coleccion):
+    mensajes = []
+    try:
+        # Obtener todos los documentos de la colección
+        documentos = coleccion.find()
+        # Recorrer los documentos y agregar los mensajes a la lista
+        for documento in documentos:
+            mensajes.append(documento)
+    except Exception as e:
+        print("Error al obtener mensajes de MongoDB:", e)
+    return mensajes
+
+# Función para obtener mensajes del consumidor de Kafka
+def leer_mensajes_kafka():
+    mensajes = []
+    try:
+        for mensaje in consumidor:
+            mensajes.append(mensaje.value)
+    except Exception as e:
+        print("Error al obtener mensajes del consumidor de Kafka:", e)
+    return mensajes
+
 #Obtener los mensajes para mostrarlos en la API
 @app.get("/mensajes")
 async def obtener_mensajes():
@@ -119,6 +174,26 @@ async def obtener_mensajes():
         mensajes = leer_mensajes_archivo("mensajes.json")
     except (FileNotFoundError, json.JSONDecodeError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    return mensajes
+
+#Obtener los mensajes de Mongo en API
+@app.get("/mensajes_MongoDB")
+async def obtener_mensajes_MongoDB():
+    try:
+        mensajes = leer_mensajes_coleccion(coleccion)
+        # Excluir el campo "_id" de cada documento
+        mensajes_sin_id = [{k: v for k, v in mensaje.items() if k != '_id'} for mensaje in mensajes]
+        return mensajes_sin_id
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+#Obtener los mensajes de kafka en API
+@app.get("/mensajes_kafka")
+async def obtener_mensajes_kafka():
+    try:
+        mensajes = leer_mensajes_kafka()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
     return mensajes
 
 # Iniciar el consumidor de Kafka en segundo plano
