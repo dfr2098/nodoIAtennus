@@ -158,47 +158,30 @@ def leer_mensajes_coleccion(coleccion):
         print("Error al obtener mensajes de MongoDB:", e)
     return mensajes
 
-# Función para obtener mensajes del consumidor de Kafka
-def leer_mensajes_kafka():
-    mensajes = []
-    try:
-        for mensaje in consumidor:
-            mensajes.append(mensaje.value)
-    except Exception as e:
-        print("Error al obtener mensajes del consumidor de Kafka:", e)
-    return mensajes
-
+# Lista para almacenar los mensajes
+mensajes = []
 
 # Función para el bucle del consumidor
 def bucle_consumidor():
     for mensaje in consumidor:
-        if mensaje.value:  # Verificar si el mensaje no está vacío
-            try:
-                mensaje_json = json.loads(mensaje.value)
-                mensajes.append(mensaje_json)
-            except json.decoder.JSONDecodeError as e:
-                error_mensaje = f"Error decodificando JSON: {e}. Mensaje saltado: {mensaje.value}"
-                mensajes.append(error_mensaje)
+        try:
+            # Agregar el mensaje a la lista directamente
+            mensajes.append(mensaje.value)
+        except Exception as e:
+            # Si se produce una excepción, agregar un mensaje de error
+            error_mensaje = f"Error procesando mensaje: {e}. Mensaje saltado: {mensaje.value}"
+            mensajes.append(error_mensaje)
 
-mensajes = []  # Lista para almacenar los mensajes
-
-# Thread para ejecutar el bucle del consumidor
-thread = threading.Thread(target=bucle_consumidor)
-thread.start()
-
-# Obtener todos los mensajes del topic en API
+# Endpoint para obtener los mensajes actuales
 @app.get("/kafka_mensajes_actuales")
 async def obtener_kafka_mensajes():
     return {"mensajes": mensajes}
 
-#Obtener los mensajes para mostrarlos en la API
-@app.get("/mensajes")
-async def obtener_mensajes():
-    try:
-        mensajes = leer_mensajes_archivo("mensajes.json")
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return mensajes
+# Iniciar el bucle del consumidor en un hilo separado
+import threading
+thread = threading.Thread(target=bucle_consumidor)
+thread.start()
+
 
 #Obtener los mensajes de Mongo en API
 @app.get("/mensajes_MongoDB")
@@ -211,14 +194,6 @@ async def obtener_mensajes_MongoDB():
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
-#Obtener los mensajes de kafka en API
-@app.get("/mensajes_kafka")
-async def obtener_mensajes_kafka():
-    try:
-        mensajes = leer_mensajes_kafka()
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    return mensajes
 
 # Iniciar el consumidor de Kafka en segundo plano
 ejecutor = ThreadPoolExecutor(max_workers=1)
