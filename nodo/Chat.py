@@ -1,4 +1,5 @@
 import json
+import threading
 from fastapi.responses import JSONResponse
 from kafka import KafkaProducer, KafkaConsumer
 from datetime import datetime
@@ -166,6 +167,29 @@ def leer_mensajes_kafka():
     except Exception as e:
         print("Error al obtener mensajes del consumidor de Kafka:", e)
     return mensajes
+
+
+# Función para el bucle del consumidor
+def bucle_consumidor():
+    for mensaje in consumidor:
+        if mensaje.value:  # Verificar si el mensaje no está vacío
+            try:
+                mensaje_json = json.loads(mensaje.value)
+                mensajes.append(mensaje_json)
+            except json.decoder.JSONDecodeError as e:
+                error_mensaje = f"Error decodificando JSON: {e}. Mensaje saltado: {mensaje.value}"
+                mensajes.append(error_mensaje)
+
+mensajes = []  # Lista para almacenar los mensajes
+
+# Thread para ejecutar el bucle del consumidor
+thread = threading.Thread(target=bucle_consumidor)
+thread.start()
+
+# Obtener todos los mensajes del topic en API
+@app.get("/kafka_mensajes_actuales")
+async def obtener_kafka_mensajes():
+    return {"mensajes": mensajes}
 
 #Obtener los mensajes para mostrarlos en la API
 @app.get("/mensajes")
