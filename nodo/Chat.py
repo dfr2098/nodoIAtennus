@@ -1,5 +1,6 @@
+import asyncio
 import json
-import threading
+from aiokafka import TopicPartition
 from fastapi.responses import JSONResponse
 from kafka import KafkaProducer, KafkaConsumer
 from datetime import datetime
@@ -8,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from pymongo import MongoClient
 from bson import ObjectId
+from kafkaMostrarMen import consumir_mensajes_kafka
 
 app = FastAPI()
 
@@ -96,6 +98,7 @@ def Enviar_y_restaurar(nombre, contenido):
 def procesar_mensaje(mensaje):
     print("Mensaje recibido:", mensaje)
     # procesar el mensaje 
+    
 """
 # Función para obtener mensajes del archivo JSON   No se usan  
 def obtener_mensajes():
@@ -158,6 +161,16 @@ def leer_mensajes_coleccion(coleccion):
         print("Error al obtener mensajes de MongoDB:", e)
     return mensajes
 
+# Función para obtener mensajes del consumidor de Kafka
+def leer_mensajes_kafka():
+    mensajes = []
+    try:
+        for mensaje in consumidor:
+            mensajes.append(mensaje.value)
+    except Exception as e:
+        print("Error al obtener mensajes del consumidor de Kafka:", e)
+    return mensajes
+
 # Lista para almacenar los mensajes
 mensajes = []
 
@@ -172,9 +185,9 @@ def bucle_consumidor():
             error_mensaje = f"Error procesando mensaje: {e}. Mensaje saltado: {mensaje.value}"
             mensajes.append(error_mensaje)
 
-# Endpoint para obtener los mensajes actuales
-@app.get("/kafka_mensajes_actuales")
-async def obtener_kafka_mensajes():
+# Obtener los mensajes actuales de kafka
+@app.get("/Mensajes actuales de Kafka")
+async def obtener_kafka_mensajes_actuales():
     return {"mensajes": mensajes}
 
 # Iniciar el bucle del consumidor en un hilo separado
@@ -182,9 +195,24 @@ import threading
 thread = threading.Thread(target=bucle_consumidor)
 thread.start()
 
+#Parte de obtener mensajes pasados de kafka
+#Obtener mensajes pasados de Kafka en API
+@app.get("/Mensajes de kafka")
+async def obtener_mensajes_pasados_kafka():
+    mensajes = await consumir_mensajes_kafka()
+    return mensajes
+
+#Obtener los mensajes para mostrarlos en la API
+@app.get("/Mensajes del JSON local")
+async def obtener_mensajes():
+    try:
+        mensajes = leer_mensajes_archivo("mensajes.json")
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return mensajes
 
 #Obtener los mensajes de Mongo en API
-@app.get("/mensajes_MongoDB")
+@app.get("/Mensajes de MongoDB")
 async def obtener_mensajes_MongoDB():
     try:
         mensajes = leer_mensajes_coleccion(coleccion)
@@ -193,7 +221,6 @@ async def obtener_mensajes_MongoDB():
         return mensajes_sin_id
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-
 
 # Iniciar el consumidor de Kafka en segundo plano
 ejecutor = ThreadPoolExecutor(max_workers=1)
