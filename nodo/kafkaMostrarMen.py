@@ -6,7 +6,7 @@ from kafka import KafkaConsumer, TopicPartition
 app = FastAPI()
 
 # Configura el consumidor de Kafka
-consumer = KafkaConsumer(
+consumidor = KafkaConsumer(
     bootstrap_servers=['localhost:9092'],
     auto_offset_reset='earliest',  # Para empezar desde el principio
     enable_auto_commit=False,  # Desactiva el auto commit para tener control manual
@@ -15,12 +15,12 @@ consumer = KafkaConsumer(
 
 async def consumir_mensajes_kafka():
     particion_topic = TopicPartition('json_topic', 0)  # Partición 0 de 'json_topic'
-    consumer.assign([particion_topic])
-    consumer.seek_to_beginning(particion_topic)  # Se posiciona al principio del topic
+    consumidor.assign([particion_topic])
+    consumidor.seek_to_beginning(particion_topic)  # Se posiciona al principio del topic
 
     mensajes = []
     while True:
-        batch = consumer.poll(timeout_ms=100)  # Espera mensajes durante 100 ms
+        batch = consumidor.poll(timeout_ms=100)  # Espera mensajes durante 100 ms
         if batch:
             for _, records in batch.items():
                 for record in records:
