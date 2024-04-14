@@ -663,3 +663,8 @@
 2024-04-12 00:57:32,048 INFO spawned: 'jupyter' with pid 10
 2024-04-12 00:57:33,118 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
 2024-04-12 00:57:33,141 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-04-12 04:58:21,966 WARN received SIGTERM indicating exit request
+2024-04-12 04:58:22,209 INFO waiting for fastapi, jupyter to die
+2024-04-12 04:58:26,200 INFO waiting for fastapi, jupyter to die
+2024-04-12 04:58:29,215 INFO waiting for fastapi, jupyter to die
+2024-04-12 04:58:30,481 INFO stopped: jupyter (exit status 0)
