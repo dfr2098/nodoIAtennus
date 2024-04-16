@@ -32,7 +32,7 @@ mongodb_sink_config = {
     "name": "mongodb-sink",
     "config": {
         "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
-        "tasks.max": "3", #tareas maximas a procesar, siempre debe ser igual o menor que las particiones del topic de kafka
+        "tasks.max": "1", #tareas maximas a procesar, siempre debe ser igual o menor que las particiones del topic de kafka
         "topics": "input_topic,output_topic",
         "connection.uri": "mongodb://dfr209811:nostromo987Q_Q@192.168.1.120:27018",
         "database": "tennus_data_analitica",
