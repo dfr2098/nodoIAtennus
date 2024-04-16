@@ -10,6 +10,7 @@ from typing import List
 from pymongo import MongoClient
 from bson import ObjectId
 from kafkaMostrarMen import consumir_mensajes_kafka
+import mysql.connector
 
 app = FastAPI()
 
@@ -19,6 +20,35 @@ cliente = MongoClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, use
 # Acceder a la base de datos y la colección MongoDB
 bd = cliente['tennus_data_analitica']  
 coleccion = bd['Mensajes']  
+
+# Configura los parámetros de conexión de MySQL
+config = {
+  'user': 'tennus01',
+  'password': 'sulaco987Q_Q',
+  'host': '192.168.1.120',
+  'database': 'test',
+  'port': '3307', # Puerto predeterminado de MySQL
+}
+
+# Intenta establecer la conexión
+try:
+    # Crea una conexión
+    conexion = mysql.connector.connect(**config)
+
+    # Comprueba si la conexión fue exitosa
+    if conexion.is_connected():
+        print('Conexión establecida correctamente.')
+        # Realiza operaciones en la base de datos aquí
+
+except mysql.connector.Error as error:
+    print(f'Error al conectar a la base de datos: {error}')
+    
+finally:
+    # Cierra la conexión
+    if 'conexion' in locals() and conexion.is_connected():
+        conexion.close()
+        print('Conexión cerrada.')
+
 
 
 # Configurar el productor de Kafka
