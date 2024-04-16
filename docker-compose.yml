@@ -97,42 +97,67 @@ networks:
       config:
         - subnet: 172.45.0.0/16
 
-zookeeper:
-  image: confluentinc/cp-zookeeper:latest
-  container_name: zookeeper
-  environment:
-    ZOOKEEPER_CLIENT_PORT: 2181
-    ZOOKEEPER_TICK_TIME: 2000
-  ports:
-    - 2181:2181
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 2181:2181
 
-kafka-broker-1:
-  image: confluentinc/cp-kafka:latest
-  container_name: kafka-broker-1
-  depends_on:
-    - zookeeper
-  environment:
-    KAFKA_BROKER_ID: 1
-    KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-    KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
-    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-  ports:
-    - "9092:9092"
+  kafka_broker_1:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka_broker_1
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka_broker_1:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
 
   kafka-ui:
     container_name: kafka-ui
     image: provectuslabs/kafka-ui:latest
     depends_on:
-      - kafka-broker-1
+      - kafka_broker_1
     ports:
       - 8080:8080
     restart: always
     environment:
       - KAFKA_CLUSTERS_0_NAME=kafka-broker-1
-      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka-broker-1:29092
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka_broker_1:29092
+
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:latest
+    container_name: kafka-connect
+    depends_on:
+      - kafka_broker_1
+    ports:
+      - "8084:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "kafka_broker_1:29092"
+      CONNECT_GROUP_ID: "kafka-connect-group"
+      GROUP_ID: "kafka-connect"
+      restart: always
+      mem_limit: 2g
+      CONNECT_CONFIG_STORAGE_TOPIC: "connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "status_topic"
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "localhost"
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONFIG_STORAGE_TOPIC: "connect-configs"
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_TOPIC: "connect-status"
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
 
 volumes:
   mysql_data:
