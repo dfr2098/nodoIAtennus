@@ -1,0 +1,19 @@
+{"intentos":[
+    {
+        "tag": "saludo",
+        "patrones": ["hola", "qué tal", "cómo estás", "saludos"],
+        "respuestas": ["Hola!", "Buenos días!", "¿Cómo estás?"]
+    },
+    {
+        "tag": "nombre",
+        "patrones": ["cómo es tu nombre", "cómo te llamas"],
+        "respuestas": ["Me llamo Juan", "Mi nombre es Juan"]
+    },
+    {
+        "tag": "colores",
+        "patrones": ["cuál es tu color favorito", "lista de colores"],
+        "respuestas": ["Mi color favorito es el morado", "El color café"]
+    }
+]
+
+}
