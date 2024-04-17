@@ -23,7 +23,7 @@ output_consumidor = KafkaConsumer('output_topic',
                                 bootstrap_servers='localhost:9092',
                                 group_id='chatbot-group')
 
-
+"""
 # URL del servidor Kafka Connect
 kafka_connect_url = "http://localhost:8084/connectors"
 
@@ -85,7 +85,7 @@ if response.status_code == 201:
     print("Conector Debezium MySQL creado con éxito.")
 else:
     print("Error al crear el conector Debezium MySQL:", response.text)
-
+"""
 
 app = FastAPI()
 
