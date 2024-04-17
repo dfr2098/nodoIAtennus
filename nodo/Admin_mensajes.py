@@ -1,18 +1,19 @@
-import asyncio
+from ast import parse
 import json
-from aiokafka import TopicPartition
+from urllib import request
+from uuid import NAMESPACE_URL, uuid5
 from fastapi.responses import JSONResponse
 from kafka import KafkaProducer, KafkaConsumer
 from datetime import datetime
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Form
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Form, Request
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from pymongo import MongoClient
-from bson import ObjectId
 from kafkaMostrarMen import consumir_mensajes_kafka
 import mysql.connector
-from pydantic import BaseModel
-
+from user_agents import parse
+from typing import Optional
+import datetime
 
 app = FastAPI()
 
@@ -63,37 +64,43 @@ consumidor = KafkaConsumer('json_topic',
                          value_deserializer=lambda x: json.loads(x.decode('utf-8')),
                          group_id='my-group')
 
-#Función para sacar el ultimo número del JSON
-def obtener_ultimo_id():
-    try:
-        with open('mensajes.json', 'r', encoding='utf-8') as archivo:
-            mensajes = json.load(archivo)
-            if mensajes:
-                # Obtener el último ID como entero
-                ultimo_id = mensajes[-1]['id']
-                return int(ultimo_id)
-            else:
-                return 0
-    except (FileNotFoundError, ValueError):
-        return 0
 
+def generar_uuid(username):
+    namespace = NAMESPACE_URL
+    return str(uuid5(namespace, username))
 
 # Función para enviar un mensaje personalizado y guardar en el archivo JSON
-def Enviar_y_restaurar(nombre, contenido):
-    # Obtener el último ID y generar el nuevo ID
-    ultimo_id = obtener_ultimo_id()
-    nuevo_id = ultimo_id + 1
+def Enviar_y_restaurar(request: Request, mensaje:str, username:str, nombre:str, tipo_usuario:str, ip=None, user_agent=None):
+    # Generar el usuario_id
+    usuario_id = generar_uuid(username)
+
+    # Acceder a la dirección IP del cliente
+    direccion_ip = request.client.host if ip is None else ip
+    # Analizar el User-Agent para obtener información sobre el dispositivo y el sistema operativo
+    dispositivo = parse(request.headers.get("User-Agent") if user_agent is None else user_agent)
+    # Sacar el sistema operativo y su versión
+    sistema_operativo = dispositivo.os.family if hasattr(dispositivo, "os") else "Desconocido"
+    version_sistema_operativo = dispositivo.os.version_string if hasattr(dispositivo, "os") else None
+    sistema_operativo_completo = f"{sistema_operativo} {version_sistema_operativo}" if version_sistema_operativo else sistema_operativo
+    
+    # Obtener la fecha y hora actual
+    fecha_hora_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # Crear un mensaje con la estructura JSON definida y personalizada
-    mensaje = {
-        "id": str(nuevo_id), #convertir int a cadena
-        "nombre": nombre,
-        "mensaje": contenido,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conversacion = {
+        "usuario_id": usuario_id,
+        "ip": direccion_ip,
+        "user_agent": request.headers.get("User-Agent") if user_agent is None else user_agent,
+        "sistema_operativo": sistema_operativo_completo,
+        "tipo_usuario": tipo_usuario,
+        "nombre_usuario": nombre,
+        "username_usuario": username,
+        "mensaje": mensaje,
+        "timestamp": fecha_hora_actual
     }
     
     try:
         # Enviar el mensaje al topic de Kafka
-        productor.send('json_topic', value=mensaje)
+        productor.send('json_topic', value=conversacion)
         print("Enviando mensaje a Kafka...")
         print("Mensaje enviado correctamente.")
     except Exception as e:
@@ -109,7 +116,7 @@ def Enviar_y_restaurar(nombre, contenido):
             pass  # El archivo no existe, crea un archivo 
         
         # Agregar el nuevo mensaje a la lista
-        mensajes.append(mensaje)
+        mensajes.append(conversacion)
         
         # Guardar la lista completa de mensajes en el archivo JSON
         with open('mensajes.json', 'w', encoding='utf-8') as archivo:
@@ -120,7 +127,7 @@ def Enviar_y_restaurar(nombre, contenido):
         
     try:
         # Guardar el mensaje en MongoDB
-        coleccion.insert_one(mensaje)
+        coleccion.insert_one(conversacion)
         print("Mensaje almacenado en MongoDB.")
     except Exception as e:
         print("Error al almacenar el mensaje en MongoDB:", e)  
@@ -216,8 +223,8 @@ def kafka_tarea_consumidor():
 
 # Ruta para enviar mensajes
 @app.post("/enviar_mensajes")
-async def enviar_mensajes(nombre: str, contenido: str, background_tasks: BackgroundTasks):
-    background_tasks.add_task(Enviar_y_restaurar, nombre, contenido)
+async def enviar_mensajes(request: Request, mensaje: str, username: str, nombre: str, tipo_usuario: str, background_tasks: BackgroundTasks, ip: Optional[str] = None, user_agent: Optional[str] = None):
+    background_tasks.add_task(Enviar_y_restaurar, request, mensaje, username, nombre, tipo_usuario, ip, user_agent)
     return {"mensaje": "Mensaje enviado y almacenado correctamente"}
 
 #Parte para enviar usuarios por medio de FasAPI de MySQL
