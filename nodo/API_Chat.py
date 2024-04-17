@@ -71,7 +71,8 @@ debezium_mysql_config = {
         "database.whitelist": "test", # lista blanca de bases de datos a las que se debe conectar
         "table.whitelist": "usuarios", # lista blanca de tablas a las que se debe conectar
         "database.history.kafka.bootstrap.servers": "localhost:9092", # direcciones de los servidores de Kafka
-        "database.history.kafka.topic": "usuarios_mysql" # nombre del tema de Kafka para el historial de la base de datos
+        "database.history.kafka.topic": "usuarios_mysql", # nombre del tema de Kafka para el historial de la base de datos
+        "topic.prefix": "clientes_" #prefijo descriptivo del funcionamiento para kafka
     }
 }
 
