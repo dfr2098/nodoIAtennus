@@ -4,13 +4,15 @@ from aiokafka import TopicPartition
 from fastapi.responses import JSONResponse
 from kafka import KafkaProducer, KafkaConsumer
 from datetime import datetime
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Form
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from pymongo import MongoClient
 from bson import ObjectId
 from kafkaMostrarMen import consumir_mensajes_kafka
 import mysql.connector
+from pydantic import BaseModel
+
 
 app = FastAPI()
 
@@ -30,6 +32,7 @@ config = {
   'port': '3307', # Puerto predeterminado de MySQL
 }
 
+"""
 # Intenta establecer la conexión
 try:
     # Crea una conexión
@@ -48,7 +51,7 @@ finally:
     if 'conexion' in locals() and conexion.is_connected():
         conexion.close()
         print('Conexión cerrada.')
-
+"""
 
 # Configurar el productor de Kafka
 productor = KafkaProducer(bootstrap_servers='localhost:9092',
@@ -84,7 +87,7 @@ def Enviar_y_restaurar(nombre, contenido):
     mensaje = {
         "id": str(nuevo_id), #convertir int a cadena
         "nombre": nombre,
-        "contenido": contenido,
+        "mensaje": contenido,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
@@ -122,11 +125,58 @@ def Enviar_y_restaurar(nombre, contenido):
     except Exception as e:
         print("Error al almacenar el mensaje en MongoDB:", e)  
         
+#funcion para guardar usuario MySQL
+def guardar_usuario_mysql(user_name, id_user_name, nombre_usuario, tipo_usuario, ip_usuario):
+    try:
+        # Guardar el usuario en MySQL
+        connection = mysql.connector.connect(**config)
+        cursor = connection.cursor()
+        
+        sql = "INSERT INTO usuarios (user_name, id_user_name, nombre_usuario, tipo_usuario, ip_usuario) VALUES (%s, %s, %s, %s, %s)"
+        val = (user_name, id_user_name, nombre_usuario, tipo_usuario, ip_usuario)
+        
+        cursor.execute(sql, val)
+        
+        connection.commit()
+        
+        print("Usuario almacenado en MySQL.")
+    except Exception as e:
+        print("Error al almacenar el usuario en MySQL:", e)
+    finally:
+        if 'connection' in locals():
+            if connection.is_connected():
+                cursor.close()
+                connection.close()
+                print("Conexión a MySQL cerrada.")
+
+#Función para extraer los datos de MySQL
+def leer_usuarios():
+    try:
+        # Establecer conexión a MySQL
+        connection = mysql.connector.connect(**config)
+        cursor = connection.cursor(dictionary=True)  # Configuración para devolver un diccionario en lugar de una lista de tuplas)
+
+        # Ejecutar consulta para obtener todos los usuarios
+        cursor.execute("SELECT * FROM usuarios")
+        
+        # Obtener todos los usuarios
+        usuarios = cursor.fetchall()
+
+        # Cerrar cursor y conexión
+        cursor.close()
+        connection.close()
+
+        return usuarios
+    except Exception as e:
+        print("Error al leer usuarios de MySQL:", e)
+        return []
+
 
 # Función para procesar un mensaje recibido
 def procesar_mensaje(mensaje):
     print("Mensaje recibido:", mensaje)
     # procesar el mensaje 
+
     
 """
 # Función para obtener mensajes del archivo JSON   No se usan  
@@ -169,6 +219,28 @@ def kafka_tarea_consumidor():
 async def enviar_mensajes(nombre: str, contenido: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(Enviar_y_restaurar, nombre, contenido)
     return {"mensaje": "Mensaje enviado y almacenado correctamente"}
+
+#Parte para enviar usuarios por medio de FasAPI de MySQL
+@app.post("/usuarios/")
+async def crear_usuario(
+    user_name: str = Form(...),
+    id_user_name: str = Form(...),
+    nombre_usuario: str = Form(...),
+    tipo_usuario: str = Form(...),
+    ip_usuario: str = Form(...)
+):
+    try:
+        guardar_usuario_mysql(
+            user_name,
+            id_user_name,
+            nombre_usuario,
+            tipo_usuario,
+            ip_usuario
+        )
+        return {"mensaje": "Usuario creado exitosamente"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 #Función para leer los archivos del JSON
 def leer_mensajes_archivo(file_path):
@@ -250,6 +322,21 @@ async def obtener_mensajes_MongoDB():
         return mensajes_sin_id
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+#API para leer los usuarios de la tabla de MySQL
+@app.get("/usuarios de MySQL")
+async def obtener_usuarios():
+    try:
+        # Leer usuarios de MySQL
+        usuarios = leer_usuarios()
+
+        # Verificar si hay usuarios
+        if usuarios:
+            return {"usuarios": usuarios}
+        else:
+            raise HTTPException(status_code=404, detail="No se encontraron usuarios")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Iniciar el consumidor de Kafka en segundo plano
 ejecutor = ThreadPoolExecutor(max_workers=1)
