@@ -1,8 +1,9 @@
 import json
 from kafka import KafkaConsumer, KafkaProducer
+from pymongo import MongoClient
 import uvicorn
 from Chatbot import predecir_clase, obtener_respuesta, intentos
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from typing import Optional
 import datetime
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -24,6 +25,19 @@ output_consumidor = KafkaConsumer('output_topic',
                                 group_id='chatbot-group')
 
 """
+# Conexión a la base de datos de MongoDB
+# Conectarse a MongoDB
+cliente = MongoClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')  
+# Acceder a la base de datos y la colección MongoDB
+bd = cliente['tennus_data_analitica']  
+coleccion = bd['Mensajes']  
+"""
+
+# URL del servidor Kafka Connect
+kafka_connect_url = "http://localhost:8084/connectors"
+
+
+"""
 # URL del servidor Kafka Connect
 kafka_connect_url = "http://localhost:8084/connectors"
 
@@ -34,12 +48,12 @@ mongodb_sink_config = {
         "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
         "tasks.max": "1", #tareas maximas a procesar, siempre debe ser igual o menor que las particiones del topic de kafka
         "topics": "input_topic,output_topic",
-        "connection.uri": "mongodb://dfr209811:nostromo987Q_Q@192.168.1.120:27018",
+        "connection.uri": "mongodb://dfr209811:nostromo987Q_Q@192.168.1.120:27018/",
         "database": "tennus_data_analitica",
         "collection": "Mensajes",
         "key.converter": "org.apache.kafka.connect.storage.StringConverter",
         "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-        "value.converter.schemas.enable": "true",
+        "value.converter.schemas.enable": "false",
         "key.ignore": "true"
     }
 }
@@ -52,6 +66,7 @@ if response.status_code == 201:
     print("Conector MongoDB creado con éxito.")
 else:
     print("Error al crear el conector MongoDB:", response.text)
+
 
 # URL del servidor Kafka Connect
 kafka_connect_url = "http://localhost:8084/connectors"
@@ -96,8 +111,6 @@ def generar_uuid(username):
 # Diccionario para almacenar las conversaciones asociadas con el usuario_id
 conversaciones = {}
 
-# Diccionario para almacenar el último mensaje de cada usuario_id
-ultimo_mensaje_por_usuario = {}
 
 def construir_conversacion(request: Request, mensaje: str, username: str, nombre: str, tipo_usuario: str, ip: Optional[str] = None, user_agent: Optional[str] = None):
     # Generar el usuario_id
@@ -183,52 +196,65 @@ async def obtener_respuesta_chat(usuario_id: str):
     return {"Respuesta": respuesta_chatbot}
 
 """
-
-@app.get("/respuesta_ultima_chat/{usuario_id}")
-async def obtener_utima_respuesta_chat(usuario_id: str):
-    # Buscar el último mensaje del usuario asociado con el usuario_id en el topic de salida
-    ultima_respuesta = None
-    for message in output_consumidor:
-        respuesta = json.loads(message.value)["respuesta"]
-        if respuesta["usuario_id"] == usuario_id:
-            ultima_respuesta = respuesta
-            # Avanzar el offset para evitar procesar mensajes antiguos en futuras solicitudes
-            output_consumidor.commit()
+# Endpoint para recuperar el historial de mensajes de un usuario
+@app.get('/historial de mensajes/{username_usuario}')
+async def obtener_historial_mensajes(username_usuario: str):
+    mensajes = list(coleccion.find({"username_usuario": username_usuario}))
+    if not mensajes:
+        raise HTTPException(status_code=404, detail=f"No se encontraron mensajes para el usuario {username_usuario}")
     
-    if ultima_respuesta is None:
-        return {"error": "No se encontró una respuesta para el usuario"}
-
-    return {"Respuesta": ultima_respuesta}
-
-from kafka.errors import KafkaTimeoutError
-
-@app.get("/respuesta_chat_correg/{usuario_id}")
-async def obtener_respuesta_chat_correg(usuario_id: str):
-    # Esperar mensajes del topic de salida con un tiempo de espera
-    try:
-        output_records = output_consumidor.poll(timeout_ms=1000)
-    except KafkaTimeoutError:
-        return {"error": "Se ha agotado el tiempo de espera de Kafka"}
-
-    # Verificar si se recibieron nuevos registros
-    if not output_records:
-        return {"error": "No se encontraron nuevas respuestas"}
-
-    # Buscar la última respuesta para el usuario_id dado
-    ultima_respuesta = None
-    for tp, records in output_records.items():
-        for record in records:
-            respuesta = json.loads(record.value)["respuesta"]
-            if respuesta["usuario_id"] == usuario_id:
-                ultima_respuesta = respuesta
-                break
-
-    # Verificar si se encontró la última respuesta
-    if ultima_respuesta is None:
-        return {"error": "No se encontró la última respuesta para el usuario"}
-
-    return {"Respuesta": ultima_respuesta}
+    historial = []
+    for mensaje in mensajes:
+        historial.append({
+            'usuario': mensaje['username_usuario'],
+            'mensaje': mensaje['mensaje']
+        })
+    
+    return {f'Mensajes de {username_usuario}': historial}
 """
+mongodb_sink_connector_name = "mongodb-sink"
+
+# Endpoint para recuperar el historial de mensajes de un usuario
+"""
+@app.get('/historial_de_mensajes/{username_usuario}')
+async def obtener_historial_mensajes(username_usuario: str):
+    # Parámetros de consulta para el conector MongoDB
+    params = {"username_usuario": username_usuario}
+
+    # Enviar la solicitud HTTP al conector de Kafka Connect
+    response = requests.get(f"{kafka_connect_url}/{mongodb_sink_connector_name}/status", params=params)
+
+    # Verificar si la solicitud fue exitosa
+    if response.status_code == 200:
+        # Extraer los datos del historial de mensajes de la respuesta JSON
+        historial = response.json()
+        return historial
+    elif response.status_code == 404:
+        # Si no se encontraron mensajes, lanzar una excepción HTTP 404
+        raise HTTPException(status_code=404, detail=f"No se encontraron mensajes para el usuario {username_usuario}")
+    else:
+        # Si ocurrió otro error, lanzar una excepción genérica
+        raise HTTPException(status_code=response.status_code, detail="Error al obtener el historial de mensajes")
+"""
+@app.get('/historial_de_mensajes/{username_usuario}')
+async def obtener_historial_mensajes(username_usuario: str):
+    # Parámetros de consulta para filtrar los mensajes por usuario
+    params = {"username_usuario": username_usuario}
+
+    # Enviar la solicitud HTTP al conector de Kafka Connect para obtener los mensajes filtrados por usuario
+    response = requests.get(f"{kafka_connect_url}/{mongodb_sink_connector_name}/topics/input_topic", params=params)
+
+    # Verificar si la solicitud fue exitosa
+    if response.status_code == 200:
+        # Extraer los datos del historial de mensajes de la respuesta JSON
+        historial = response.json()
+        return historial
+    elif response.status_code == 404:
+        # Si no se encontraron mensajes, lanzar una excepción HTTP 404
+        raise HTTPException(status_code=404, detail=f"No se encontraron mensajes para el usuario {username_usuario}")
+    else:
+        # Si ocurrió otro error, lanzar una excepción genérica
+        raise HTTPException(status_code=response.status_code, detail="Error al obtener el historial de mensajes")
 
 # Iniciar uvicorn 
 
