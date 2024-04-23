@@ -1,32 +1,21 @@
 from enum import Enum
+import hashlib
 import json
 import random
 import string
-from kafka import KafkaConsumer, KafkaProducer
+import uuid
+from kafka import KafkaConsumer, KafkaProducer, TopicPartition
 from pymongo import MongoClient
 import uvicorn
-from Chatbot import predecir_clase, obtener_respuesta, intentos
+from chattbot import predecir_clase, obtener_respuesta, intentos
 from fastapi import FastAPI, HTTPException, Request
 from typing import Optional
 import datetime
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from user_agents import parse
 import requests  
+from kafka.admin import KafkaAdminClient, NewTopic, NewPartitions
 
-# Configuración de Kafka
-productor = KafkaProducer(bootstrap_servers='localhost:9092',
-                          key_serializer=lambda k: str(k).encode('utf-8'),
-                          value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'))
-
-input_consumidor = KafkaConsumer('input_topic',
-                               bootstrap_servers='localhost:9092',
-                               value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-                               group_id='chatbot-group')
-
-# Nueva configuración para el segundo topic de respuestas
-output_consumidor = KafkaConsumer('output_topic',
-                                bootstrap_servers='localhost:9092',
-                                group_id='chatbot-group')
 
 """
 # Conexión a la base de datos de MongoDB
@@ -36,10 +25,6 @@ cliente = MongoClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, use
 bd = cliente['tennus_data_analitica']  
 coleccion = bd['Mensajes']  
 """
-
-# URL del servidor Kafka Connect
-kafka_connect_url = "http://localhost:8084/connectors"
-
 
 """
 # URL del servidor Kafka Connect
@@ -105,6 +90,40 @@ if response.status_code == 201:
 else:
     print("Error al crear el conector Debezium MySQL:", response.text)
 """
+
+
+# Configuración de Kafka
+productor = KafkaProducer(bootstrap_servers='localhost:9092',
+                          key_serializer=lambda k: str(k).encode('utf-8'),
+                          value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'))
+
+input_consumidor = KafkaConsumer('input_topic',
+                               bootstrap_servers='localhost:9092',
+                               value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+                               group_id='chatbot-group')
+
+# Nueva configuración para el segundo topic de respuestas
+output_consumidor = KafkaConsumer('output_topic',
+                                bootstrap_servers='localhost:9092',
+                                group_id='chatbot-group')
+
+
+# Define la configuración de los servidores de Kafka
+bootstrap_servers = 'localhost:9092'
+
+# Inicializar el administrador del cluster Kafka
+admin_client = KafkaAdminClient(bootstrap_servers=bootstrap_servers)
+
+
+
+""" Crear topics desde Python
+# Asegurarse de que el topic "historial_topic" exista
+topic = NewTopic(name="historial_topic", num_partitions=NUM_PARTICIONES, replication_factor=1)
+admin_client.create_topics([topic])
+"""
+
+# URL del servidor Kafka Connect
+kafka_connect_url = "http://localhost:8084/connectors"
 
 app = FastAPI()
 
@@ -196,6 +215,219 @@ async def chat(
     
     return {"conversación": conversacion}
 
+# Nueva configuración para el tercer topic de historial
+historial_productor = KafkaProducer(bootstrap_servers='localhost:9092',
+                                    key_serializer=lambda k: str(k).encode('utf-8'),
+                                    value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'))
+
+MIN_NUM_PARTICIONES = 10
+claves_distintas = set()
+
+def asignar_particion(usuario_id: str) -> int:
+    num_particiones = max(len(claves_distintas), MIN_NUM_PARTICIONES)
+    hash_usuario_id = hash(usuario_id)
+    particion = hash_usuario_id % num_particiones
+    return particion
+
+def aumentar_particiones_si_es_necesario(topic_name):
+    num_claves_distintas = len(claves_distintas)
+    if num_claves_distintas > MIN_NUM_PARTICIONES:
+        admin_client = KafkaAdminClient(bootstrap_servers='localhost:9092')
+        current_partitions = admin_client.describe_topics(topic_name)[topic_name].partitions
+        num_particiones_actuales = len(current_partitions)
+        nuevas_particiones = num_claves_distintas if num_claves_distintas > num_particiones_actuales else num_particiones_actuales
+        if nuevas_particiones > num_particiones_actuales:
+            new_partitions = NewPartitions(total_count=nuevas_particiones)
+            admin_client.create_partitions({topic_name: new_partitions})
+
+def asignar_particion_modificada(usuario_id: str) -> int:
+    num_claves_distintas = len(claves_distintas)
+    num_particiones = max(num_claves_distintas, MIN_NUM_PARTICIONES)
+    hash_usuario_id = hash(usuario_id)
+    particion = hash_usuario_id % num_particiones
+    return particion
+
+@app.post("/respuesta_chat/{usuario_id}")
+async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None):
+    datos_usuario = conversaciones.get(usuario_id)
+
+    if datos_usuario is None:
+        raise HTTPException(status_code=404, detail="Token de conversación no válido")
+
+    mensaje = datos_usuario.get("mensaje")
+    usernameR = datos_usuario.get("username_usuario")
+
+    intento = predecir_clase(mensaje)
+    respuesta = obtener_respuesta(intento, intentos)
+    
+    if "conversacion" not in datos_usuario:
+        datos_usuario["conversacion"] = []
+
+    claves_distintas.add(usuario_id)
+
+    conversacion_usuario = {
+        "usuario_id": usuario_id,
+        "ip": datos_usuario.get("ip"),
+        "user_agent": datos_usuario.get("user_agent"),
+        "sistema_operativo": datos_usuario.get("sistema_operativo"),
+        "tipo_usuario": datos_usuario.get("tipo_usuario"),
+        "nombre_usuario": datos_usuario.get("nombre_usuario"),
+        "username_usuario": usernameR,
+        "mensaje": mensaje,
+        "timestamp": datos_usuario.get("timestamp")
+    }
+
+    respuesta_chatbot = {
+        "usuario_id": usuario_id,
+        "username_usuario": usernameR,
+        "autor": "Chatbot",
+        "respuesta": respuesta,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    completo = {
+        "Usuario": [conversacion_usuario],
+        "Chatbot": [respuesta_chatbot]
+    }
+    
+    productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
+    
+    aumentar_particiones_si_es_necesario('historial_topic')
+    
+    particion = asignar_particion_modificada(usuario_id)
+
+    historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
+
+    return {"Respuesta": respuesta_chatbot}
+
+"""FUNCIONA
+from fastapi import Header
+
+NUM_PARTICIONES = 10
+
+def asignar_particion(usuario_id: str) -> int:
+    # Obtener un hash del usuario_id
+    hash_usuario_id = hash(usuario_id)
+    # Aplicar módulo para obtener la partición
+    particion = hash_usuario_id % NUM_PARTICIONES
+    return particion
+
+@app.post("/respuesta_chat/{usuario_id}")
+async def obtener_respuesta_chat(
+    usuario_id: str,
+    username: Optional[str] = None
+):
+    datos_usuario = conversaciones.get(usuario_id)
+
+    if datos_usuario is None:
+        return {"error": "Token de conversación no válido"}
+
+    mensaje = datos_usuario.get("mensaje")
+    usernameR = datos_usuario.get("username_usuario")
+
+    intento = predecir_clase(mensaje)
+    respuesta = obtener_respuesta(intento, intentos)
+    
+    if "conversacion" not in datos_usuario:
+        datos_usuario["conversacion"] = []
+
+    conversacion_usuario = {
+        "usuario_id": usuario_id,
+        "ip": datos_usuario.get("ip"),
+        "user_agent": datos_usuario.get("user_agent"),
+        "sistema_operativo": datos_usuario.get("sistema_operativo"),
+        "tipo_usuario": datos_usuario.get("tipo_usuario"),
+        "nombre_usuario": datos_usuario.get("nombre_usuario"),
+        "username_usuario": usernameR,
+        "mensaje": mensaje,
+        "timestamp": datos_usuario.get("timestamp")
+    }
+
+    respuesta_chatbot = {
+        "usuario_id": usuario_id,
+        "username_usuario": usernameR,
+        "autor": "Chatbot",
+        "respuesta": respuesta,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    completo = {
+        "Usuario": [conversacion_usuario],
+        "Chatbot": [respuesta_chatbot]
+    }
+    
+    productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
+    
+    # Asignar partición utilizando la función de asignación de particiones
+    particion = asignar_particion(usuario_id)
+
+    historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
+
+    return {"Respuesta": respuesta_chatbot}
+"""
+
+"""
+from fastapi import Header
+NUM_PARTICIONES = 5
+
+@app.post("/respuesta_chat/{usuario_id}")
+async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None, partition: int = Header(None)):
+    datos_usuario = conversaciones.get(usuario_id)
+
+    if datos_usuario is None:
+        return {"error": "Token de conversación no válido"}
+
+    mensaje = datos_usuario.get("mensaje")
+    usernameR = datos_usuario.get("username_usuario")
+
+    intento = predecir_clase(mensaje)
+    respuesta = obtener_respuesta(intento, intentos)
+    
+    if "conversacion" not in datos_usuario:
+        datos_usuario["conversacion"] = []
+
+    conversacion_usuario = {
+        "usuario_id": usuario_id,
+        "ip": datos_usuario.get("ip"),
+        "user_agent": datos_usuario.get("user_agent"),
+        "sistema_operativo": datos_usuario.get("sistema_operativo"),
+        "tipo_usuario": datos_usuario.get("tipo_usuario"),
+        "nombre_usuario": datos_usuario.get("nombre_usuario"),
+        "username_usuario": usernameR,
+        "mensaje": mensaje,
+        "timestamp": datos_usuario.get("timestamp")
+    }
+
+    respuesta_chatbot = {
+        "usuario_id": usuario_id,
+        "username_usuario": usernameR,
+        "autor": "Chatbot",
+        "respuesta": respuesta,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    completo = {
+        "Usuario": [conversacion_usuario],
+        "Chatbot": [respuesta_chatbot]
+    }
+    
+    productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
+    
+    # Validar la partición del encabezado
+    if partition is None:
+        return {"error": "Se requiere el encabezado 'partition' para especificar la partición."}
+
+    particion = partition
+
+    historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
+
+    return {"Respuesta": respuesta_chatbot}
+"""
+
+"""
+# Define el número de particiones
+NUM_PARTICIONES = 5
+
 @app.post("/respuesta_chat/{usuario_id}")
 async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None):
     # Obtener los datos del usuario asociados con el usuario_id
@@ -206,7 +438,7 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
 
     # Obtener el mensaje del usuario
     mensaje = datos_usuario.get("mensaje")
-    usernameR= datos_usuario.get("username_usuario")
+    usernameR = datos_usuario.get("username_usuario")
 
     # Obtener el intento y la respuesta del chatbot
     intento = predecir_clase(mensaje)
@@ -214,7 +446,20 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
     
     # Asegurarse de que datos_usuario tenga una clave "conversacion" que sea una lista
     if "conversacion" not in datos_usuario:
-        datos_usuario["Chatbot"] = []
+        datos_usuario["conversacion"] = []
+
+    # Añadir la conversación del usuario
+    conversacion_usuario = {
+        "usuario_id": usuario_id,
+        "ip": datos_usuario.get("ip"),
+        "user_agent": datos_usuario.get("user_agent"),
+        "sistema_operativo": datos_usuario.get("sistema_operativo"),
+        "tipo_usuario": datos_usuario.get("tipo_usuario"),
+        "nombre_usuario": datos_usuario.get("nombre_usuario"),
+        "username_usuario": usernameR,
+        "mensaje": mensaje,
+        "timestamp": datos_usuario.get("timestamp")
+    }
 
     # Añadir la respuesta del chatbot a la conversación
     respuesta_chatbot = {
@@ -225,14 +470,154 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # Agregar la respuesta del chatbot a la conversación del usuario
-    datos_usuario["Chatbot"].append(respuesta_chatbot)
+    # Agregar la conversación del usuario y la respuesta del chatbot a la lista
+    completo = {
+        "Usuario": [conversacion_usuario],
+        "Chatbot": [respuesta_chatbot]
+    }
     
     # Enviamos la conversación completa al topic de salida
-    productor.send('output_topic',key=usuario_id, value={"respuesta": respuesta_chatbot})
+    productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
+    
+    # Definir la partición utilizando el usuario_id
+    particion = int(usuario_id.replace("-", ""), 16) % NUM_PARTICIONES
+
+    # Enviamos la conversación completa al topic de historial
+    historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
 
     return {"Respuesta": respuesta_chatbot}
 
+
+
+# Define el número de particiones
+NUM_PARTICIONES = 5
+
+@app.post("/respuesta_chat/{usuario_id}")
+async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None):
+    # Obtener los datos del usuario asociados con el usuario_id
+    datos_usuario = conversaciones.get(usuario_id)
+
+    if datos_usuario is None:
+        return {"error": "Token de conversación no válido"}
+
+    # Obtener el mensaje del usuario
+    mensaje = datos_usuario.get("mensaje")
+    usernameR = datos_usuario.get("username_usuario")
+
+    # Obtener el intento y la respuesta del chatbot
+    intento = predecir_clase(mensaje)
+    respuesta = obtener_respuesta(intento, intentos)
+    
+    # Asegurarse de que datos_usuario tenga una clave "conversacion" que sea una lista
+    if "conversacion" not in datos_usuario:
+        datos_usuario["conversacion"] = []
+
+    # Añadir la conversación del usuario
+    conversacion_usuario = {
+        "usuario_id": usuario_id,
+        "ip": datos_usuario.get("ip"),
+        "user_agent": datos_usuario.get("user_agent"),
+        "sistema_operativo": datos_usuario.get("sistema_operativo"),
+        "tipo_usuario": datos_usuario.get("tipo_usuario"),
+        "nombre_usuario": datos_usuario.get("nombre_usuario"),
+        "username_usuario": usernameR,
+        "mensaje": mensaje,
+        "timestamp": datos_usuario.get("timestamp")
+    }
+
+    # Añadir la respuesta del chatbot a la conversación
+    respuesta_chatbot = {
+        "usuario_id": usuario_id,
+        "username_usuario": usernameR,
+        "autor": "Chatbot",
+        "respuesta": respuesta,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    # Agregar la conversación del usuario y la respuesta del chatbot a la lista
+    completo = {
+        "Usuario": [conversacion_usuario],
+        "Chatbot": [respuesta_chatbot]
+    }
+    
+    # Enviamos la conversación completa al topic de salida
+    productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
+    
+    # Definir la partición utilizando el usuario_id
+    particion = abs(hash(usuario_id)) % NUM_PARTICIONES
+
+    # Enviamos la conversación completa al topic de historial
+    historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
+
+    return {"Respuesta": respuesta_chatbot}
+"""
+
+""" SIN LO DE LAS PARTICIONES
+# Nueva configuración para el tercer topic de historial
+historial_productor = KafkaProducer(bootstrap_servers='localhost:9092',
+                                    key_serializer=lambda k: str(k).encode('utf-8'),
+                                    value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'))
+
+@app.post("/respuesta_chat/{usuario_id}")
+async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None):
+    # Obtener los datos del usuario asociados con el usuario_id
+    datos_usuario = conversaciones.get(usuario_id)
+
+    if datos_usuario is None:
+        return {"error": "Token de conversación no válido"}
+
+    # Obtener el mensaje del usuario
+    mensaje = datos_usuario.get("mensaje")
+    usernameR = datos_usuario.get("username_usuario")
+
+    # Obtener el intento y la respuesta del chatbot
+    intento = predecir_clase(mensaje)
+    respuesta = obtener_respuesta(intento, intentos)
+    
+    # Asegurarse de que datos_usuario tenga una clave "conversacion" que sea una lista
+    if "conversacion" not in datos_usuario:
+        datos_usuario["conversacion"] = []
+
+    # Añadir la conversación del usuario
+    conversacion_usuario = {
+        "usuario_id": usuario_id,
+        "ip": datos_usuario.get("ip"),
+        "user_agent": datos_usuario.get("user_agent"),
+        "sistema_operativo": datos_usuario.get("sistema_operativo"),
+        "tipo_usuario": datos_usuario.get("tipo_usuario"),
+        "nombre_usuario": datos_usuario.get("nombre_usuario"),
+        "username_usuario": usernameR,
+        "mensaje": mensaje,
+        "timestamp": datos_usuario.get("timestamp")
+    }
+
+    # Añadir la respuesta del chatbot a la conversación
+    respuesta_chatbot = {
+        "usuario_id": usuario_id,
+        "username_usuario": usernameR,
+        "autor": "Chatbot",
+        "respuesta": respuesta,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    # Agregar la conversación del usuario y la respuesta del chatbot a la lista
+    completo = {
+        "Usuario": [conversacion_usuario],
+        "Chatbot": [respuesta_chatbot]
+    }
+    
+    # Enviamos la conversación completa al topic de salida
+    productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
+    
+    # Enviamos la conversación completa al topic de historial
+    historial_productor.send(
+        'historial_topic', 
+        key=usuario_id, 
+        value=completo
+    )
+
+    return {"Respuesta": respuesta_chatbot}
+"""
 
 mongodb_sink_connector_name = "mongodb-sink"
 
