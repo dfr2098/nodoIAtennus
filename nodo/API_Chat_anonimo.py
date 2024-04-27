@@ -220,7 +220,7 @@ historial_productor = KafkaProducer(bootstrap_servers='localhost:9092',
                                     key_serializer=lambda k: str(k).encode('utf-8'),
                                     value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'))
 
-MIN_NUM_PARTICIONES = 10
+MIN_NUM_PARTICIONES = 5
 claves_distintas = set()
 
 def asignar_particion(usuario_id: str) -> int:
@@ -229,23 +229,28 @@ def asignar_particion(usuario_id: str) -> int:
     particion = hash_usuario_id % num_particiones
     return particion
 
-def aumentar_particiones_si_es_necesario(topic_name):
-    num_claves_distintas = len(claves_distintas)
-    if num_claves_distintas > MIN_NUM_PARTICIONES:
-        admin_client = KafkaAdminClient(bootstrap_servers='localhost:9092')
-        current_partitions = admin_client.describe_topics(topic_name)[topic_name].partitions
-        num_particiones_actuales = len(current_partitions)
-        nuevas_particiones = num_claves_distintas if num_claves_distintas > num_particiones_actuales else num_particiones_actuales
-        if nuevas_particiones > num_particiones_actuales:
-            new_partitions = NewPartitions(total_count=nuevas_particiones)
-            admin_client.create_partitions({topic_name: new_partitions})
+
+def aumentar_particiones_si_es_necesario(topic_name, claves_distintas):
+    admin_client = KafkaAdminClient(bootstrap_servers='localhost:9092')
+    try:
+        topics = admin_client.describe_topics(topic_name)
+        if topic_name in topics:
+            current_partitions = topics[topic_name].partitions
+            num_particiones_actuales = len(current_partitions)
+            nuevas_particiones = len(claves_distintas) # 
+            if nuevas_particiones > num_particiones_actuales:
+                new_partitions = NewPartitions(total_count=nuevas_particiones)
+                admin_client.create_partitions({topic_name: new_partitions})
+                print(f"Se crearon {nuevas_particiones - num_particiones_actuales} nuevas particiones para el topic {topic_name}")
+    finally:
+        admin_client.close()
 
 def asignar_particion_modificada(usuario_id: str) -> int:
     num_claves_distintas = len(claves_distintas)
     num_particiones = max(num_claves_distintas, MIN_NUM_PARTICIONES)
-    hash_usuario_id = hash(usuario_id)
-    particion = hash_usuario_id % num_particiones
+    particion = hash(usuario_id) % num_particiones
     return particion
+
 
 @app.post("/respuesta_chat/{usuario_id}")
 async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None):
@@ -292,7 +297,7 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
     
     productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
     
-    aumentar_particiones_si_es_necesario('historial_topic')
+    aumentar_particiones_si_es_necesario('historial_topic', claves_distintas)
     
     particion = asignar_particion_modificada(usuario_id)
 
