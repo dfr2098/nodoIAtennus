@@ -7,7 +7,7 @@ import uuid
 from kafka import KafkaConsumer, KafkaProducer, TopicPartition
 from pymongo import MongoClient
 import uvicorn
-from chattbot import predecir_clase, obtener_respuesta, intentos
+from Chatbot import predecir_clase, obtener_respuesta, intentos
 from fastapi import FastAPI, HTTPException, Request
 from typing import Optional
 import datetime
