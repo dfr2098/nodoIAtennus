@@ -881,3 +881,12 @@
 2024-04-29 17:41:11,346 INFO spawned: 'jupyter' with pid 9
 2024-04-29 17:41:12,376 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
 2024-04-29 17:41:12,378 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-04-29 21:50:38,934 CRIT could not write pidfile /nodo/supervisord.pid
+2024-04-29 21:50:39,957 INFO spawned: 'fastapi' with pid 9
+2024-04-29 21:50:39,990 INFO spawned: 'jupyter' with pid 10
+2024-04-29 21:50:41,018 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-04-29 21:50:41,019 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-04-29 21:50:54,857 WARN received SIGTERM indicating exit request
+2024-04-29 21:50:54,861 INFO waiting for fastapi, jupyter to die
+2024-04-29 21:50:55,167 INFO stopped: jupyter (exit status 0)
+2024-04-29 21:50:55,454 INFO stopped: fastapi (exit status 0)
