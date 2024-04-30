@@ -16,6 +16,8 @@ from user_agents import parse
 from kafka.admin import KafkaAdminClient, NewPartitions
 from kafka.errors import KafkaError, UnknownTopicOrPartitionError
 import threading
+from collections import namedtuple
+
 
 """
 # Conexión a la base de datos de MongoDB
@@ -106,12 +108,22 @@ historial_consumidor = KafkaConsumer(
         bootstrap_servers=bootstrap_servers,
         auto_offset_reset='earliest',  
         enable_auto_commit=True,  
-        key_deserializer=lambda k: k.decode('utf-8'),
-        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+        key_deserializer=lambda k: k,
+        value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+        group_id='chatbot-group',
+        consumer_timeout_ms=1000 # Tiempo máximo de espera para recibir mensajes en milisegundos
     )
 
+"""
     # Suscribir el consumidor al topic existente
 historial_consumidor.subscribe(topics=[historial_topic])
+
+# Verificar si el consumidor se ha suscrito al topic
+if historial_topic in historial_consumidor.subscription():
+    print("El consumidor se ha suscrito correctamente al topic:", historial_topic)
+else:
+    print("Error: El consumidor no se ha suscrito al topic:", historial_topic)
+"""
 
 """
 def consumir_mensajes_historial():
@@ -144,6 +156,11 @@ if historial_topic in topics:
 else:
     print(f"El topic '{historial_topic}' no existe en el clúster Kafka.")
 
+# Obtener una lista de todos los temas
+topics = admin_client.list_topics()
+
+# Imprimir la lista de temas
+print(topics)
 
 # Configuración de Kafka
 productor = KafkaProducer(bootstrap_servers='localhost:9092',
@@ -734,65 +751,77 @@ async def obtener_historial(usuario_id: str):
 
 MAX_MENSAJES = 5  # Definir el número máximo de mensajes del historial
 
+
 @app.get("/obtener_historial/{usuario_id}")
 async def obtener_historial(usuario_id: str):
     try:
         # Obtener la partición asignada al usuario
         particion = obtener_particion_usuario(usuario_id, historial_consumidor, historial_topic)
-        print("la particion para el usuario id "+ usuario_id + " es " + str(particion))
+        print("La partición para el usuario id " + usuario_id + " es " + str(particion))
+        
         # Asignar la partición al consumidor
         historial_consumidor.assign([TopicPartition(historial_topic, particion)])
-
+        
+        # Reiniciar el offset al principio de la partición correspondiente
+        particion_objeto = TopicPartition(historial_topic, particion)
+        historial_consumidor.seek(particion_objeto, 0)
+        
         # Filtrar mensajes por el usuario_id y la partición asignada
         mensajes_usuario = []
-        print("entrando en el bucle")
+        print("Entrando en el bucle")
+        
+        # Lista para almacenar los mensajes sin procesar
+        mensajes_sin_procesar = []
+        
         for mensaje in historial_consumidor:
-            if mensaje.key == usuario_id and mensaje.partition == particion:
-                # Procesar los datos del usuario
-                print("dentro del bucle de historial_consumidor")
-                for usuario_datos in mensaje.value["Usuario"]:
-                    # Almacenar los datos en un diccionario
-                    datos = {
-                        "usuario_id": usuario_datos["usuario_id"],
-                        "ip": usuario_datos["ip"],
-                        "user_agent": usuario_datos["user_agent"],
-                        "sistema_operativo": usuario_datos["sistema_operativo"],
-                        "tipo_usuario": usuario_datos["tipo_usuario"],
-                        "nombre_usuario": usuario_datos["nombre_usuario"],
-                        "username_usuario": usuario_datos["username_usuario"],
-                        "mensaje": usuario_datos["mensaje"],
-                        "timestamp": usuario_datos["timestamp"]
-                    }
-                    mensajes_usuario.append(datos)
-
-                # Procesar los datos del chatbot
-                for chatbot_datos in mensaje.value["Chatbot"]:
-                    # Almacenar los datos en un diccionario
-                    datos = {
-                        "usuario_id": chatbot_datos["usuario_id"],
-                        "username_usuario": chatbot_datos["username_usuario"],
-                        "autor": chatbot_datos["autor"],
-                        "respuesta": chatbot_datos["respuesta"],
-                        "timestamp": chatbot_datos["timestamp"]
-                    }
-                    mensajes_usuario.append(datos)
-
-                # Confirmar que se ha procesado el mensaje
-                historial_consumidor.commit()
-                print("el commit del consumidor ha finalizado")
-
+            mensaje_id = mensaje.key.decode('utf-8')
+            
+            if mensaje_id == usuario_id and mensaje.partition == particion:
+                mensajes_sin_procesar.append(mensaje)
+                
                 # Detener el bucle después de cierto número de mensajes
-                if len(mensajes_usuario) >= MAX_MENSAJES:
+                if len(mensajes_sin_procesar) >= MAX_MENSAJES:
                     break
+
+        # Ordenar los mensajes por offset de mayor a menor
+        mensajes_sin_procesar.sort(key=lambda x: x.offset, reverse=True)
+
+        # Procesar los mensajes ordenados
+        for mensaje in mensajes_sin_procesar:
+            for usuario_datos in mensaje.value["Usuario"]:
+                datos_usuario = {
+                    "usuario_id": usuario_datos["usuario_id"],
+                    "ip": usuario_datos["ip"],
+                    "user_agent": usuario_datos["user_agent"],
+                    "sistema_operativo": usuario_datos["sistema_operativo"],
+                    "tipo_usuario": usuario_datos["tipo_usuario"],
+                    "nombre_usuario": usuario_datos["nombre_usuario"],
+                    "username_usuario": usuario_datos["username_usuario"],
+                    "mensaje": usuario_datos["mensaje"],
+                    "timestamp": usuario_datos["timestamp"]
+                }
+                mensajes_usuario.append(datos_usuario)
+
+            for chatbot_datos in mensaje.value["Chatbot"]:
+                datos_chatbot = {
+                    "usuario_id": chatbot_datos["usuario_id"],
+                    "username_usuario": chatbot_datos["username_usuario"],
+                    "autor": chatbot_datos["autor"],
+                    "respuesta": chatbot_datos["respuesta"],
+                    "timestamp": chatbot_datos["timestamp"]
+                }
+                mensajes_usuario.append(datos_chatbot)
 
         if not mensajes_usuario:
             raise HTTPException(status_code=404, detail="No se encontró historial para este usuario")
 
         return mensajes_usuario
+
     except HTTPException as e:
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 #función para obtener el numero de particiones de un topic
 def obtener_numero_particiones(bootstrap_servers, topic):
@@ -817,122 +846,38 @@ else:
     print("No se pudo obtener el número de particiones del tópico.")
 
 
-"""
-def obtener_particion_usuario(usuario_id: str) -> int:
-    # Obtener dinámicamente el número de particiones del topic
-    numero_particiones = obtener_numero_particiones('localhost:9092', 'historial_topic')
-    if numero_particiones is None:
-        # Manejar el caso en que no se pueda obtener el número de particiones
-        raise ValueError("No se pudo obtener el número de particiones del tópico.")
-    
-    # Calcular el hash del usuario_id y asegurarse de que esté dentro del rango de 0 al número de particiones
-    particion = hash(usuario_id) % numero_particiones
-    return particion
-
-
-#función para obtener la partición especifica con el usuario_id en x topic
-def obtener_particion_usuario(usuario_id: str, topic_name: str) -> int:
-    try:
-        # Suscribir el consumidor al topic correcto
-        historial_consumidor.subscribe([topic_name])
-
-        # Obtener una instancia del objeto Topic correspondiente al topic_name
-        topics = historial_consumidor.topics()
-        topic = next(iter(topics), None)
-        if topic is None:
-            raise ValueError("No se encontraron topics para el consumidor")
-
-        # Obtener las particiones asignadas al usuario_id en el topic
-        particiones_asignadas = topic.partitions_for_topic(topic_name)
-        if particiones_asignadas is None:
-            raise ValueError("No se encontraron particiones asignadas para el topic")
-
-        # Convertir las particiones asignadas a una lista para facilitar la manipulación
-        particiones_asignadas = list(particiones_asignadas)
-
-        # Iterar sobre las particiones asignadas y verificar en cuál está el usuario_id
-        for particion in particiones_asignadas:
-            topic_partition = TopicPartition(topic_name, particion)
-            topic.assign([topic_partition])
-            topic.seek_to_beginning(topic_partition)
-            for mensaje in topic:
-                if mensaje.key == usuario_id:
-                    return particion
-
-        # Si no se encuentra el usuario_id en ninguna partición asignada, lanzar una excepción
-        raise ValueError(f"No se encontró el usuario {usuario_id} en ninguna partición asignada")
-    except Exception as e:
-        print(f"Error al obtener la partición para el usuario {usuario_id}: {e}")
-        raise
-
-
 def obtener_particion_usuario(usuario_id: str, historial_consumidor, topic_name: str) -> int:
     try:
-        # Obtener las particiones asignadas al topic
-        particiones_asignadas = historial_consumidor.partitions_for_topic(topic_name)
-        if particiones_asignadas is None:
-            raise ValueError(f"No se encontraron particiones asignadas para el topic {topic_name}")
-
-        # Convertir las particiones asignadas a una lista para facilitar la manipulación
-        particiones_asignadas = list(particiones_asignadas)
-
-        # Iterar sobre las particiones asignadas y verificar en cuál está el usuario_id
-        for particion in particiones_asignadas:
-            topic_partition = TopicPartition(topic_name, particion)
-            historial_consumidor.assign([topic_partition])
-            historial_consumidor.seek_to_beginning(topic_partition)
-            for mensaje in historial_consumidor:
-                if mensaje.key == usuario_id.encode('utf-8'):
-                    return particion
-
-        # Si no se encuentra el usuario_id en ninguna partición asignada, lanzar una excepción
-        raise ValueError(f"No se encontró el usuario {usuario_id} en ninguna partición asignada")
-    except Exception as e:
-        print(f"Error al obtener la partición para el usuario {usuario_id}: {e}")
-        raise
-"""    
-
-# Obtener una lista de todos los temas
-topics = admin_client.list_topics()
-
-# Imprimir la lista de temas
-print(topics)
-
-def obtener_particion_usuario(usuario_id: str, historial_consumidor, topic_name: str) -> int:
-    try:
-        # Obtener la lista de particiones asignadas al consumidor
-        asignadas = historial_consumidor.partitions_for_topic(topic_name)
-        print("Particiones asignadas al consumidor:", asignadas)
-        
-        # Convertir el conjunto de números de partición en una lista de objetos TopicPartition
-        asignadas = [TopicPartition(topic_name, partition) for partition in asignadas]
-        
-        # Iterar sobre todas las particiones asignadas al consumidor
-        for tp in asignadas:
+        # Asignar la partición deseada al consumidor
+        particion_deseada = None
+        for partition in historial_consumidor.partitions_for_topic(topic_name):
+            tp = TopicPartition(topic_name, partition)
+            historial_consumidor.assign([tp])
             print(f"Buscando en la partición {tp.partition} del topic '{topic_name}'...")
-            historial_consumidor.assign([tp])  # Asignar solo la partición actual
-            
-            mensajes_consumidos = 0
             historial_consumidor.seek_to_beginning(tp)  # Ir al inicio de la partición
-            while mensajes_consumidos < 100:  # Límite de mensajes por partición
-                try:
-                    mensaje = next(historial_consumidor)
-                except StopIteration:
-                    print("No hay más mensajes en la partición.")
-                    break  # No hay más mensajes en la partición
-                if mensaje.key == usuario_id.encode('utf-8') and mensaje.topic == topic_name:
+            
+            # Iterar sobre los mensajes de la partición actual
+            for mensaje in historial_consumidor:
+                print(f"Clave del mensaje: {mensaje.key}")
+                print(f"ID de usuario: {usuario_id}")
+                
+                # Convertir la clave del mensaje y el ID de usuario a cadenas antes de comparar
+                if mensaje.key.decode('utf-8') == usuario_id:
                     print(f"¡Usuario encontrado en la partición {tp.partition} del topic '{topic_name}'!")
-                    return tp.partition
-                mensajes_consumidos += 1
-                print(f"Mensajes consumidos: {mensajes_consumidos}")
+                    particion_deseada = tp.partition
+                    break  # Salir del bucle una vez que se encuentre el usuario
         
-        # Si no se encontró el usuario_id en ninguna partición, lanzar una excepción
-        raise ValueError(f"No se encontró el usuario {usuario_id} en ninguna partición asignada del topic '{topic_name}'.")
+        # Si no se encuentra el usuario en ninguna partición, lanzar una excepción
+        if particion_deseada is None:
+            raise ValueError(f"No se encontró el usuario {usuario_id} en ninguna partición asignada del topic '{topic_name}'.")
+        
+        return particion_deseada
+    
     except Exception as e:
         print(f"Error al obtener la partición para el usuario {usuario_id}: {e}")
         raise
 
-
+"""
 # Suponiendo un usuario_id y el nombre del topic
 usuario_id = "e1fb173c-e370-54d0-a8d2-2155c395dee6"
 historial_topic = "historial_topic"
@@ -949,8 +894,9 @@ def imprimir_particion_usuario(usuario_id, historial_consumidor, historial_topic
 
 # Llamar a la función imprimir_particion_usuario
 imprimir_particion_usuario(usuario_id, historial_consumidor, historial_topic)
-
+"""
 
 # Iniciar uvicorn 
 if __name__ == "__main__":
     uvicorn.run(app, host="localhost", port=8000)
+
