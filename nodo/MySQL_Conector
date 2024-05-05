@@ -1,0 +1,34 @@
+# URL del servidor Kafka Connect
+import requests
+
+kafka_connect_url = "http://localhost:8084/connectors"
+
+# Configuración del conector Debezium MySQL
+debezium_mysql_config = {
+    "name": "debezium-mysql-connector",
+    "config": {
+        "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+        "tasks.max": "1", # número máximo de tareas
+        "database.hostname": "192.168.1.120", # dirección del servidor de la base de datos MySQL
+        "database.port": "3307", # puerto de la base de datos MySQL
+        "database.user": "tennus01", # usuario de la base de datos MySQL
+        "database.password": "sulaco987Q_Q", # contraseña de la base de datos MySQL
+        "database.server.id": "1", #id del servidor para kafka
+        "database.server.name": "dbusuarios", #nombre del servidor para kafka
+        "database.whitelist": "test", # lista blanca de bases de datos a las que se debe conectar
+        "table.whitelist": "usuarios", # lista blanca de tablas a las que se debe conectar
+        "database.history.kafka.bootstrap.servers": "localhost:9092", # direcciones de los servidores de Kafka
+        "database.history.kafka.topic": "usuarios_mysql", # nombre del tema de Kafka para el historial de la base de datos
+        "topic.prefix": "clientes_" #prefijo descriptivo del funcionamiento para kafka
+    }
+}
+
+
+# Enviar la solicitud HTTP para crear el conector
+response = requests.post(kafka_connect_url, json=debezium_mysql_config)
+
+# Verificar si la solicitud fue exitosa
+if response.status_code == 201:
+    print("Conector Debezium MySQL creado con éxito.")
+else:
+    print("Error al crear el conector Debezium MySQL:", response.text)
