@@ -1,26 +1,26 @@
+#Importación de librerías
 from enum import Enum
 import hashlib
 import json
 import random
 import string
-import uuid
 from kafka import KafkaConsumer, KafkaProducer, TopicPartition
-from pymongo import MongoClient
 import uvicorn
 from Chatbot import predecir_clase, obtener_respuesta, intentos
 from fastapi import FastAPI, HTTPException, Request
 from typing import Optional
 import datetime
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 from user_agents import parse 
 from kafka.admin import KafkaAdminClient, NewPartitions
-from kafka.errors import KafkaError, UnknownTopicOrPartitionError
-import threading
+from kafka.errors import KafkaError
 from collections import namedtuple
-
+from typing import Set
+import hashlib
 
 """
-# Conexión a la base de datos de MongoDB
+from pymongo import MongoClient
+# Conexión a la base de datos de MongoDB clásica 
 # Conectarse a MongoDB
 cliente = MongoClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')  
 # Acceder a la base de datos y la colección MongoDB
@@ -28,80 +28,66 @@ bd = cliente['tennus_data_analitica']
 coleccion = bd['Mensajes']  
 """
 
-"""
-# URL del servidor Kafka Connect
-kafka_connect_url = "http://localhost:8084/connectors"
-
-# Configuración del conector MongoDB
-mongodb_sink_config = {
-    "name": "mongodb-sink",
-    "config": {
-        "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
-        "tasks.max": "1", #tareas maximas a procesar, siempre debe ser igual o menor que las particiones del topic de kafka
-        "topics": "input_topic,output_topic",
-        "connection.uri": "mongodb://dfr209811:nostromo987Q_Q@192.168.1.120:27018/",
-        "database": "tennus_data_analitica",
-        "collection": "Mensajes",
-        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
-        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-        "value.converter.schemas.enable": "false",
-        "key.ignore": "true"
-    }
-}
-
-# Enviar la solicitud HTTP para crear el conector
-response = requests.post(kafka_connect_url, json=mongodb_sink_config)
-
-# Verificar si la solicitud fue exitosa
-if response.status_code == 201:
-    print("Conector MongoDB creado con éxito.")
-else:
-    print("Error al crear el conector MongoDB:", response.text)
-
+#Configuración del entorno y de las variables
+#Iniciar FastAPI
+app = FastAPI()
 
 # URL del servidor Kafka Connect
 kafka_connect_url = "http://localhost:8084/connectors"
 
-# Configuración del conector Debezium MySQL
-debezium_mysql_config = {
-    "name": "debezium-mysql-connector",
-    "config": {
-        "connector.class": "io.debezium.connector.mysql.MySqlConnector",
-        "tasks.max": "1", # número máximo de tareas
-        "database.hostname": "192.168.1.120", # dirección del servidor de la base de datos MySQL
-        "database.port": "3307", # puerto de la base de datos MySQL
-        "database.user": "tennus01", # usuario de la base de datos MySQL
-        "database.password": "sulaco987Q_Q", # contraseña de la base de datos MySQL
-        "database.server.id": "1", #id del servidor para kafka
-        "database.server.name": "dbusuarios", #nombre del servidor para kafka
-        "database.whitelist": "test", # lista blanca de bases de datos a las que se debe conectar
-        "table.whitelist": "usuarios", # lista blanca de tablas a las que se debe conectar
-        "database.history.kafka.bootstrap.servers": "localhost:9092", # direcciones de los servidores de Kafka
-        "database.history.kafka.topic": "usuarios_mysql", # nombre del tema de Kafka para el historial de la base de datos
-        "topic.prefix": "clientes_" #prefijo descriptivo del funcionamiento para kafka
-    }
-}
-
-
-# Enviar la solicitud HTTP para crear el conector
-response = requests.post(kafka_connect_url, json=debezium_mysql_config)
-
-# Verificar si la solicitud fue exitosa
-if response.status_code == 201:
-    print("Conector Debezium MySQL creado con éxito.")
-else:
-    print("Error al crear el conector Debezium MySQL:", response.text)
-"""
+#Asignar el conector llamado "mongodb-sink"
+mongodb_sink_conector_nombre = "mongodb-sink"
 
 # Define la configuración de los servidores de Kafka
 bootstrap_servers = 'localhost:9092'
 historial_topic = 'historial_topic'
 
 # Inicializar el administrador del cluster Kafka
-admin_client = KafkaAdminClient(bootstrap_servers=bootstrap_servers)
+admin_cliente = KafkaAdminClient(bootstrap_servers=bootstrap_servers)
+
+# Obtener una lista de todos los temas
+topics = admin_cliente.list_topics()
+
+# Verificar si el topic existe
+if historial_topic in topics:
+    print(f"El topic '{historial_topic}' existe en el clúster Kafka.")
+else:
+    print(f"El topic '{historial_topic}' no existe en el clúster Kafka.")
+
+# Imprimir la lista de temas
+print(topics)
 
 # Lista para almacenar los mensajes consumidos
 mensajes_consumidos = []
+
+# Diccionario para almacenar las conversaciones asociadas con el usuario_id
+conversaciones = {}
+
+#Particiones actuales existentes en el topic de "historial_topic"
+MIN_NUM_PARTICIONES = 5
+
+# Definir el número máximo de mensajes del historial
+MAX_MENSAJES = 5  
+
+#Conjunto de datos para almacenar las distintas claves "usuario_id"
+claves_distintas: Set[str] = set()
+
+#Clase para el particionado customizado
+class CustomPartitioner:
+    def __init__(self, num_particiones):
+        self.num_particiones = num_particiones
+
+    def particion(self, key):
+        # Calcular el hash de la clave
+        hash_clave = hash(key)
+        # Ajustar el resultado del hash al rango de particiones
+        particion = hash_clave % self.num_particiones
+        # Si el valor de la partición es negativo, se convierte a positivo
+        if particion < 0:
+            particion = -particion
+        # Agregar impresiones de registro para la clave y su hash
+        print(f"Clave: {key}, Hash: {hash_clave}, Partición: {particion}")
+        return particion
 
 # Inicializar el consumidor de Kafka con la nueva configuración
 historial_consumidor = KafkaConsumer(
@@ -114,8 +100,34 @@ historial_consumidor = KafkaConsumer(
         consumer_timeout_ms=1000 # Tiempo máximo de espera para recibir mensajes en milisegundos
     )
 
+# Configuración de Kafka
+productor = KafkaProducer(bootstrap_servers='localhost:9092',
+                          key_serializer=lambda k: str(k).encode('utf-8'),
+                          value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'))
+
+input_consumidor = KafkaConsumer('input_topic',
+                               bootstrap_servers='localhost:9092',
+                               value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+                               group_id='chatbot-group')
+
+# Nueva configuración para el segundo topic de respuestas
+output_consumidor = KafkaConsumer('output_topic',
+                                bootstrap_servers='localhost:9092',
+                                group_id='chatbot-group')
+
+# Nueva configuración para el tercer topic de historial
+historial_productor = KafkaProducer(
+    bootstrap_servers='localhost:9092',
+    key_serializer=lambda k: str(k).encode('utf-8'),
+    value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'),
+    partitioner=CustomPartitioner(MIN_NUM_PARTICIONES)
+)
+
+# Crear una instancia del particionador personalizado una sola vez
+custom_particionador = CustomPartitioner(MIN_NUM_PARTICIONES)
+
 """
-    # Suscribir el consumidor al topic existente
+# Suscribir el consumidor al topic existente
 historial_consumidor.subscribe(topics=[historial_topic])
 
 # Verificar si el consumidor se ha suscrito al topic
@@ -149,49 +161,13 @@ consumer_thread = threading.Thread(target=consumir_mensajes_historial)
 consumer_thread.start()
 """
 
-# Verificar si el topic existe
-topics = admin_client.list_topics()
-if historial_topic in topics:
-    print(f"El topic '{historial_topic}' existe en el clúster Kafka.")
-else:
-    print(f"El topic '{historial_topic}' no existe en el clúster Kafka.")
-
-# Obtener una lista de todos los temas
-topics = admin_client.list_topics()
-
-# Imprimir la lista de temas
-print(topics)
-
-# Configuración de Kafka
-productor = KafkaProducer(bootstrap_servers='localhost:9092',
-                          key_serializer=lambda k: str(k).encode('utf-8'),
-                          value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'))
-
-input_consumidor = KafkaConsumer('input_topic',
-                               bootstrap_servers='localhost:9092',
-                               value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-                               group_id='chatbot-group')
-
-# Nueva configuración para el segundo topic de respuestas
-output_consumidor = KafkaConsumer('output_topic',
-                                bootstrap_servers='localhost:9092',
-                                group_id='chatbot-group')
-
-
 """ Crear topics desde Python
 # Asegurarse de que el topic "historial_topic" exista
 topic = NewTopic(name="historial_topic", num_partitions=NUM_PARTICIONES, replication_factor=1)
 admin_client.create_topics([topic])
 """
 
-# URL del servidor Kafka Connect
-kafka_connect_url = "http://localhost:8084/connectors"
-
-app = FastAPI()
-
-# Diccionario para almacenar las conversaciones asociadas con el usuario_id
-conversaciones = {}
-
+#Definición de clase y funciones para tipo de usuario
 class TipoUsuario(str, Enum):
     Registrado = "Registrado"
     Anonimo = "Anónimo"
@@ -206,6 +182,103 @@ def generar_username():
 def generar_nombre():
     return "Anónimo"
 
+#Definición de funciones para manejo de particiones
+def aumentar_particiones_si_es_necesario(nombre_topic, claves_distintas):
+    admin_client = KafkaAdminClient(bootstrap_servers='localhost:9092')
+    try:
+        topics = admin_client.describe_topics(nombre_topic)
+        if nombre_topic in topics:
+            particiones_actuales = topics[nombre_topic].partitions
+            num_particiones_actuales = len(particiones_actuales)
+            nuevas_particiones = len(claves_distintas)
+            if nuevas_particiones > num_particiones_actuales:
+                nueva_particion = NewPartitions(total_count=nuevas_particiones)
+                admin_client.create_partitions({nombre_topic: nueva_particion})
+                print(f"Se crearon {nuevas_particiones - num_particiones_actuales} nuevas particiones para el topic {nombre_topic}")
+    finally:
+        admin_client.close()
+
+def asignar_particion_modificada(usuario_id: str) -> int:
+    # Calculamos el hash de usuario_id utilizando SHA-256
+    hash_usuario_id = hashlib.sha256(usuario_id.encode()).hexdigest()
+    # Convertimos el hash a un entero y lo mapeamos al rango de particiones
+    particion = int(hash_usuario_id, 16) % MIN_NUM_PARTICIONES
+    return particion
+
+#función para obtener el numero de particiones de un topic
+def obtener_numero_particiones(bootstrap_servers, topic):
+    try:
+        admin_client = KafkaAdminClient(bootstrap_servers=bootstrap_servers)
+        topic_metadata = admin_client.describe_topics([topic])
+        for topic_info in topic_metadata:
+            if topic_info['topic'] == topic:
+                numero_particiones = len(topic_info['partitions'])
+                return numero_particiones
+        # Si no se encuentra información sobre el tópico, devuelve None
+        return None
+    except KafkaError as e:
+        print(f"Error al obtener el número de particiones del tópico {topic}: {e}")
+        return None
+
+#Función para obtener la partición de un usuario 
+def obtener_particion_usuario(usuario_id: str, historial_consumidor, nombre_topic: str) -> int:
+    try:
+        # Asignar la partición deseada al consumidor
+        particion_deseada = None
+        for particion in historial_consumidor.partitions_for_topic(nombre_topic):
+            tp = TopicPartition(nombre_topic, particion)
+            historial_consumidor.assign([tp])
+            print(f"Buscando en la partición {tp.partition} del topic '{nombre_topic}'...")
+            historial_consumidor.seek_to_beginning(tp)  # Ir al inicio de la partición
+            
+            # Iterar sobre los mensajes de la partición actual
+            for mensaje in historial_consumidor:
+                print(f"Clave del mensaje: {mensaje.key}")
+                print(f"ID de usuario: {usuario_id}")
+                
+                # Convertir la clave del mensaje y el ID de usuario a cadenas antes de comparar
+                if mensaje.key.decode('utf-8') == usuario_id:
+                    print(f"¡Usuario encontrado en la partición {tp.partition} del topic '{nombre_topic}'!")
+                    particion_deseada = tp.partition
+                    break  # Salir del bucle una vez que se encuentre el usuario
+        
+        # Si no se encuentra el usuario en ninguna partición, lanzar una excepción
+        if particion_deseada is None:
+            raise ValueError(f"No se encontró el usuario {usuario_id} en ninguna partición asignada del topic '{nombre_topic}'.")
+        
+        return particion_deseada
+    
+    except Exception as e:
+        print(f"Error al obtener la partición para el usuario {usuario_id}: {e}")
+        raise
+
+"""
+# Suponiendo un usuario_id y el nombre del topic, para verificar la búsqueda de particiones por "usuario_id
+usuario_id = "e1fb173c-e370-54d0-a8d2-2155c395dee6"
+historial_topic = "historial_topic"
+
+def imprimir_particion_usuario(usuario_id, historial_consumidor, historial_topic):
+    try:
+        # Llamada a la función obtener_particion_usuario
+        particion = obtener_particion_usuario(usuario_id, historial_consumidor, historial_topic)
+
+        # Imprimir el valor de la partición
+        print(f"La partición asignada para el usuario {usuario_id} es: {particion}")
+    except Exception as e:
+        print(f"Error al imprimir la partición para el usuario {usuario_id}: {e}")
+
+# Llamar a la función imprimir_particion_usuario
+imprimir_particion_usuario(usuario_id, historial_consumidor, historial_topic)
+"""
+
+# llamar a la función para obtener el número de particiones del topic
+numero_particiones = obtener_numero_particiones('localhost:9092', 'historial_topic')
+if numero_particiones is not None:
+    print(f"El número de particiones en 'historial_topic' es: {numero_particiones}")
+else:
+    print("No se pudo obtener el número de particiones del tópico.")
+
+#Función para construir el JSON de la conversación 
 def construir_conversacion(request: Request, mensaje: str, tipo_usuario: TipoUsuario, username: str, nombre: str, ip: Optional[str] = None, user_agent: Optional[str] = None):
     # Rellenar username y nombre si el tipo_usuario es "Anónimo"
     if tipo_usuario == TipoUsuario.Anonimo:
@@ -244,8 +317,7 @@ def construir_conversacion(request: Request, mensaje: str, tipo_usuario: TipoUsu
     return conversacion
 
 
-app = FastAPI()
-
+#Endpoint para recibir la respuesta del usuario
 @app.get("/chat")
 async def chat(
     request: Request,
@@ -263,6 +335,7 @@ async def chat(
     if tipo_usuario == TipoUsuario.Registrado:
         if not (username and nombre):
             raise HTTPException(status_code=400, detail="El username y el nombre son obligatorios para usuarios registrados.")
+    
     # Construir la conversación
     conversacion = construir_conversacion(request, mensaje, tipo_usuario, username, nombre, ip, user_agent)
     
@@ -278,62 +351,7 @@ async def chat(
     return {"conversación": conversacion}
 
 
-from typing import Set
-
-MIN_NUM_PARTICIONES = 5
-claves_distintas: Set[str] = set()
-
-import hashlib
-
-class CustomPartitioner:
-    def __init__(self, num_partitions):
-        self.num_partitions = num_partitions
-
-    def partition(self, key):
-        # Calculamos el hash de la clave
-        hash_key = hash(key)
-        # Ajustamos el resultado del hash al rango de particiones
-        partition = hash_key % self.num_partitions
-        # Si el valor de la partición es negativo, lo convertimos a positivo
-        if partition < 0:
-            partition = -partition
-        # Agregamos impresiones de registro para la clave y su hash
-        print(f"Clave: {key}, Hash: {hash_key}, Partición: {partition}")
-        return partition
-
-def aumentar_particiones_si_es_necesario(topic_name, claves_distintas):
-    admin_client = KafkaAdminClient(bootstrap_servers='localhost:9092')
-    try:
-        topics = admin_client.describe_topics(topic_name)
-        if topic_name in topics:
-            current_partitions = topics[topic_name].partitions
-            num_particiones_actuales = len(current_partitions)
-            nuevas_particiones = len(claves_distintas)
-            if nuevas_particiones > num_particiones_actuales:
-                new_partitions = NewPartitions(total_count=nuevas_particiones)
-                admin_client.create_partitions({topic_name: new_partitions})
-                print(f"Se crearon {nuevas_particiones - num_particiones_actuales} nuevas particiones para el topic {topic_name}")
-    finally:
-        admin_client.close()
-
-def asignar_particion_modificada(usuario_id: str) -> int:
-    # Calculamos el hash de usuario_id utilizando SHA-256
-    hash_usuario_id = hashlib.sha256(usuario_id.encode()).hexdigest()
-    # Convertimos el hash a un entero y lo mapeamos al rango de particiones
-    particion = int(hash_usuario_id, 16) % MIN_NUM_PARTICIONES
-    return particion
-
-# Nueva configuración para el tercer topic de historial
-historial_productor = KafkaProducer(
-    bootstrap_servers='localhost:9092',
-    key_serializer=lambda k: str(k).encode('utf-8'),
-    value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'),
-    partitioner=CustomPartitioner(MIN_NUM_PARTICIONES)
-)
-
-# Crear una instancia del particionador personalizado una sola vez
-custom_partitioner = CustomPartitioner(MIN_NUM_PARTICIONES)
-
+#Endpoint para recibir la respuesta del chatbot
 @app.post("/respuesta_chat/{usuario_id}")
 async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None):
     num_claves_distintas = len(claves_distintas)
@@ -341,6 +359,7 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
     particion = hash(usuario_id) % num_particiones
     
     datos_usuario = conversaciones.get(usuario_id)
+    
 
     if datos_usuario is None:
         raise HTTPException(status_code=404, detail="Token de conversación no válido")
@@ -387,11 +406,10 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
     
     particion = asignar_particion_modificada(usuario_id)
     # Antes de enviar el mensaje a Kafka, calcular la partición a la que se asignará la clave
-    particion = CustomPartitioner(MIN_NUM_PARTICIONES).partition(key=usuario_id)
+    particion = CustomPartitioner(MIN_NUM_PARTICIONES).particion(key=usuario_id)
     print(f"Clave: {usuario_id}, Partición: {particion}")
     # Luego, enviar el mensaje a Kafka
     historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
-    
     
     return {"Respuesta": respuesta_chatbot}
 
@@ -583,8 +601,6 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
 
     return {"Respuesta": respuesta_chatbot}
 
-
-
 # Define el número de particiones
 NUM_PARTICIONES = 5
 
@@ -715,9 +731,6 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
     return {"Respuesta": respuesta_chatbot}
 """
 
-mongodb_sink_connector_name = "mongodb-sink"
-
-
 """
 @app.get("/obtener_historial/{usuario_id}")
 async def obtener_historial(usuario_id: str):
@@ -749,9 +762,7 @@ async def obtener_historial(usuario_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 """
 
-MAX_MENSAJES = 5  # Definir el número máximo de mensajes del historial
-
-
+#Endpoint para obtener el historial de cierto usuario por su "usuario_id"
 @app.get("/obtener_historial/{usuario_id}")
 async def obtener_historial(usuario_id: str):
     try:
@@ -821,80 +832,6 @@ async def obtener_historial(usuario_id: str):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-#función para obtener el numero de particiones de un topic
-def obtener_numero_particiones(bootstrap_servers, topic):
-    try:
-        admin_client = KafkaAdminClient(bootstrap_servers=bootstrap_servers)
-        topic_metadata = admin_client.describe_topics([topic])
-        for topic_info in topic_metadata:
-            if topic_info['topic'] == topic:
-                numero_particiones = len(topic_info['partitions'])
-                return numero_particiones
-        # Si no se encuentra información sobre el tópico, devuelve None
-        return None
-    except KafkaError as e:
-        print(f"Error al obtener el número de particiones del tópico {topic}: {e}")
-        return None
-
-# llamar a la función para obtener el número de particiones del topic
-numero_particiones = obtener_numero_particiones('localhost:9092', 'historial_topic')
-if numero_particiones is not None:
-    print(f"El número de particiones en 'historial_topic' es: {numero_particiones}")
-else:
-    print("No se pudo obtener el número de particiones del tópico.")
-
-
-def obtener_particion_usuario(usuario_id: str, historial_consumidor, topic_name: str) -> int:
-    try:
-        # Asignar la partición deseada al consumidor
-        particion_deseada = None
-        for partition in historial_consumidor.partitions_for_topic(topic_name):
-            tp = TopicPartition(topic_name, partition)
-            historial_consumidor.assign([tp])
-            print(f"Buscando en la partición {tp.partition} del topic '{topic_name}'...")
-            historial_consumidor.seek_to_beginning(tp)  # Ir al inicio de la partición
-            
-            # Iterar sobre los mensajes de la partición actual
-            for mensaje in historial_consumidor:
-                print(f"Clave del mensaje: {mensaje.key}")
-                print(f"ID de usuario: {usuario_id}")
-                
-                # Convertir la clave del mensaje y el ID de usuario a cadenas antes de comparar
-                if mensaje.key.decode('utf-8') == usuario_id:
-                    print(f"¡Usuario encontrado en la partición {tp.partition} del topic '{topic_name}'!")
-                    particion_deseada = tp.partition
-                    break  # Salir del bucle una vez que se encuentre el usuario
-        
-        # Si no se encuentra el usuario en ninguna partición, lanzar una excepción
-        if particion_deseada is None:
-            raise ValueError(f"No se encontró el usuario {usuario_id} en ninguna partición asignada del topic '{topic_name}'.")
-        
-        return particion_deseada
-    
-    except Exception as e:
-        print(f"Error al obtener la partición para el usuario {usuario_id}: {e}")
-        raise
-
-"""
-# Suponiendo un usuario_id y el nombre del topic
-usuario_id = "e1fb173c-e370-54d0-a8d2-2155c395dee6"
-historial_topic = "historial_topic"
-
-def imprimir_particion_usuario(usuario_id, historial_consumidor, historial_topic):
-    try:
-        # Llamada a la función obtener_particion_usuario
-        particion = obtener_particion_usuario(usuario_id, historial_consumidor, historial_topic)
-
-        # Imprimir el valor de la partición
-        print(f"La partición asignada para el usuario {usuario_id} es: {particion}")
-    except Exception as e:
-        print(f"Error al imprimir la partición para el usuario {usuario_id}: {e}")
-
-# Llamar a la función imprimir_particion_usuario
-imprimir_particion_usuario(usuario_id, historial_consumidor, historial_topic)
-"""
 
 # Iniciar uvicorn 
 if __name__ == "__main__":
