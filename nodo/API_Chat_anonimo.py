@@ -17,15 +17,33 @@ from kafka.errors import KafkaError
 from collections import namedtuple
 from typing import Set
 import hashlib
-
-"""
+import mysql.connector
+from bson import ObjectId
 from pymongo import MongoClient
+import motor.motor_asyncio
+
 # Conexión a la base de datos de MongoDB clásica 
 # Conectarse a MongoDB
 cliente = MongoClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')  
-# Acceder a la base de datos y la colección MongoDB
+# Acceder a la base de datos y las colecciones de MongoDB
 bd = cliente['tennus_data_analitica']  
-coleccion = bd['Mensajes']  
+conversaciones_coleccion = bd['Mensajes']
+respuestas_coleccion = bd['Respuestas']
+
+# Conexión a la base de datos de MongoDB asincrónica
+client = motor.motor_asyncio.AsyncIOMotorClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')
+db = client["tennus_data_analitica"]
+conversaciones_collection = db["Mensajes"]
+
+"""
+# Configura los parámetros de conexión de MySQL
+config = {
+  'user': 'tennus01',
+  'password': 'sulaco987Q_Q',
+  'host': '192.168.1.120',
+  'database': 'test',
+  'port': '3307', # Puerto predeterminado de MySQL
+}
 """
 
 #Configuración del entorno y de las variables
@@ -71,6 +89,17 @@ MAX_MENSAJES = 5
 
 #Conjunto de datos para almacenar las distintas claves "usuario_id"
 claves_distintas: Set[str] = set()
+
+# Función para convertir ObjectId a cadena
+def convertir_object_id_a_cadena(obj):
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {k: convertir_object_id_a_cadena(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convertir_object_id_a_cadena(v) for v in obj]
+    else:
+        return obj
 
 #Clase para el particionado customizado
 class CustomPartitioner:
@@ -181,6 +210,16 @@ def generar_username():
 
 def generar_nombre():
     return "Anónimo"
+
+# Función para guardar la conversación en la base de datos
+def guardar_conversacion(conversacion):
+    conversacion_convertida = convertir_object_id_a_cadena(conversacion)
+    conversaciones_coleccion.insert_one(conversacion_convertida)
+    
+# Función para guardar las respuestas en la base de datos   
+def guardar_respuestas(respuesta):
+    respuesta_convertida = convertir_object_id_a_cadena(respuesta)
+    respuestas_coleccion.insert_one(respuesta_convertida)
 
 #Definición de funciones para manejo de particiones
 def aumentar_particiones_si_es_necesario(nombre_topic, claves_distintas):
@@ -345,6 +384,9 @@ async def chat(
     # Almacenar la conversación asociada con el usuario_id
     conversaciones[usuario_id] = conversacion
     
+    # Guardar la conversación en la base de datos
+    guardar_conversacion(conversacion)
+    
     # Enviamos la solicitud al chatbot
     productor.send('input_topic', key=usuario_id, value={"conversación": conversacion})
     
@@ -358,9 +400,16 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
     num_particiones = max(num_claves_distintas, MIN_NUM_PARTICIONES)
     particion = hash(usuario_id) % num_particiones
     
-    datos_usuario = conversaciones.get(usuario_id)
+    #datos_usuario = conversaciones.get(usuario_id)
+    # Obtener los datos del usuario de la base de datos MongoDB
+    #datos_usuario = await conversaciones_collection.find_one({"usuario_id": usuario_id})
+    # Obtener los datos del usuario de la base de datos MongoDB
+    datos_usuario = await conversaciones_collection.find_one(
+        {"usuario_id": usuario_id},
+        sort=[("timestamp", -1)],
+        limit=1
+    )
     
-
     if datos_usuario is None:
         raise HTTPException(status_code=404, detail="Token de conversación no válido")
 
@@ -408,7 +457,11 @@ async def obtener_respuesta_chat(usuario_id: str, username: Optional[str] = None
     # Antes de enviar el mensaje a Kafka, calcular la partición a la que se asignará la clave
     particion = CustomPartitioner(MIN_NUM_PARTICIONES).particion(key=usuario_id)
     print(f"Clave: {usuario_id}, Partición: {particion}")
-    # Luego, enviar el mensaje a Kafka
+    
+    # Guardar la respuesta en la base de datos
+    guardar_respuestas(respuesta_chatbot)
+    
+    # Luego, enviar el historial a Kafka
     historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
     
     return {"Respuesta": respuesta_chatbot}
