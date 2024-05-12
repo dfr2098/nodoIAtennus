@@ -197,41 +197,37 @@ def aumentar_particiones_si_es_necesario(nombre_topic, claves_distintas):
     finally:
         admin_client.close()
 """
+
 #Definición de funciones para manejo de particiones
 #llama a la colección para hacer una dupla y verifica si realmente no hay datos duplicados con el mismo usuario_id y particion
-def determinar_numero_de_particiones_necesarias(coleccion_base_datos):
+async def determinar_numero_de_particiones_necesarias(coleccion_base_datos):
     try:
         valores_unicos = set()
-        for documento in coleccion_base_datos.find():
+        async for documento in coleccion_base_datos.find():
             id_usuario = documento['usuario_id']
             particion = documento['particion']
             valor_combinado = (id_usuario, particion)
             valores_unicos.add(valor_combinado)
         return len(valores_unicos)
-    except PyMongoError as e:
-        print(f"Error en la operación con MongoDB: {e}")
+    except Exception as e:
+        print(f"Error en la operación con MongoDB: {str(e)}")
         return None
 
 #función que se adapta ahora con MongoDB
-def aumentar_particiones_si_es_necesario(nombre_topic, coleccion):
+async def aumentar_particiones_si_es_necesario(nombre_topic, coleccion):
     try:
-        topics = admin_cliente.describe_topics(nombre_topic)
+        topics = admin_cliente.describe_topics([nombre_topic])
         if nombre_topic in topics:
-            particiones_actuales = topics[nombre_topic].partitions
+            particiones_actuales = topics[nombre_topic]['partitions']
             num_particiones_actuales = len(particiones_actuales)
-            particiones_requeridas = determinar_numero_de_particiones_necesarias(coleccion)
-            if particiones_requeridas is None:
-                # No se pudo determinar el número de particiones requeridas, salir de la función
-                return
-            if particiones_requeridas > num_particiones_actuales:
-                nueva_particion = NewPartitions(total_count=particiones_requeridas)
-                admin_cliente.create_partitions({nombre_topic: nueva_particion})
+            particiones_requeridas = await determinar_numero_de_particiones_necesarias(coleccion)
+            if particiones_requeridas is not None and particiones_requeridas > num_particiones_actuales:
+                nueva_particion = {"total_count": particiones_requeridas}
+                await admin_cliente.create_partitions({nombre_topic: nueva_particion})
                 print(f"Se crearon {particiones_requeridas - num_particiones_actuales} nuevas particiones para el topic {nombre_topic}")
-    except KafkaError as e:
-        print(f"Error en la operación con Kafka: {e}")
-    finally:
-        admin_cliente.close()
-
+    except Exception as e:
+        print(f"Error en la operación con Kafka: {str(e)}")
+        
 #función para obtener el numero de particiones de un topic
 def obtener_numero_particiones(bootstrap_servers, topic):
     try:
@@ -246,7 +242,6 @@ def obtener_numero_particiones(bootstrap_servers, topic):
     except KafkaError as e:
         print(f"Error al obtener el número de particiones del tópico {topic}: {e}")
         return None
-
 
 #Función para obtener la partición de un usuario 
 def obtener_particion_usuario(usuario_id: str, historial_consumidor, nombre_topic: str) -> int:
@@ -310,33 +305,36 @@ else:
     print("No se pudo encontrar el número de particiones del topic.")
     MIN_NUM_PARTICIONES = 5
 
-#Clase para el particionado customizado
-class CustomPartitioner:
+# Clase para el particionado customizado
+class ParticionadorPersonalizado:
     def __init__(self, num_particiones):
         self.num_particiones = num_particiones
 
     def particion(self, key):
-        # Calcular el hash de la clave
-        hash_clave = hash(key)
-        # Ajustar el resultado del hash al rango de particiones
+        # Extrae el usuario_id de 16 dígitos de la clave
+        usuario_id = key['usuario_id']
+        # Calcula la suma del código ASCII de cada carácter en el usuario_id
+        hash_clave = sum(ord(c) for c in usuario_id)
+        # Calcula el módulo del hash con el número de particiones
         particion = hash_clave % self.num_particiones
-        # Si el valor de la partición es negativo, se convierte a positivo
-        if particion < 0:
-            particion = -particion
-        # Agregar impresiones de registro para la clave y su hash
-        print(f"Clave: {key}, Hash: {hash_clave}, Partición: {particion}")
+        # Si el valor de la partición es 0, se convierte a 1
+        if particion == 0:
+            particion = 1
+        # Agrega impresiones de registro para la clave, su hash y la partición
+        print(f"Clave: {usuario_id}, Hash: {hash_clave}, Partición: {particion}")
         return particion
+
 
 # Nueva configuración para el tercer topic de historial
 historial_productor = KafkaProducer(
     bootstrap_servers='localhost:9092',
     key_serializer=lambda k: str(k).encode('utf-8'),
     value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'),
-    partitioner=CustomPartitioner(MIN_NUM_PARTICIONES)
+    partitioner=ParticionadorPersonalizado(MIN_NUM_PARTICIONES)
 )
 
 # Crear una instancia del particionador personalizado una sola vez
-custom_particionador = CustomPartitioner(MIN_NUM_PARTICIONES)
+custom_particionador = ParticionadorPersonalizado(MIN_NUM_PARTICIONES)
 
 #Verificar si el usuario y la particion existen en MongoDB, y lo guarda en caso de que no existan aún
 async def guardar_unico_documento(nuevo_documento):
@@ -402,6 +400,33 @@ async def construir_conversacion(request: Request, mensaje: str, tipo_usuario: T
     return conversacion
 
 
+# Variable global para indicar si se debe ejecutar la función eliminar_particion_y_historial
+ejecutar_eliminar_particion = False
+
+#middleware que registra si el usuario es anonimo o registrado, si es registrado sigue normal, si es anonimo, a la hora de cerrar la conexión con fastAPI manda a llamar la función para eliminar la partición y el historial de dicho usuario anonimo
+@app.middleware("http")
+async def determinar_tipo_usuario(request: Request, call_next):
+    global ejecutar_eliminar_particion
+    
+    username = request.query_params.get("username_usuario")
+    nombre = request.query_params.get("nombre_usuario")
+    
+    tipo_usuario = TipoUsuario.Anonimo
+    if username and nombre:
+        tipo_usuario = TipoUsuario.Registrado
+
+    # Agregar el tipo de usuario al contexto de la solicitud
+    request.state.tipo_usuario = tipo_usuario
+
+    # Continuar con el manejo de la solicitud
+    response = await call_next(request)
+
+    # Si el tipo de usuario es anónimo y se activó el indicador de ejecución, ejecuta la función de eliminación
+    if request.state.tipo_usuario == TipoUsuario.Anonimo and ejecutar_eliminar_particion:
+        eliminar_particion_y_historial(usuario_id="usuario_id", historial_consumidor="historial", nombre_topic="nombre_topic", admin_cliente="admin_cliente")
+
+    return response
+
 #Endpoint para recibir la respuesta del usuario
 @app.get("/chat")
 async def chat(
@@ -427,6 +452,9 @@ async def chat(
     # Obtener el usuario_id de la conversación
     usuario_id = conversacion["usuario_id"]
     
+    # Obtener el tipo de usuario del contexto de la solicitud
+    tipo_usuario = request.state.tipo_usuario
+    
     # Guardar la conversación en la base de datos
     await guardar_conversacion(conversacion)
     
@@ -440,7 +468,7 @@ async def chat(
 @app.post("/respuesta_chat/{usuario_id}")
 async def obtener_respuesta_chat(usuario_id: str):
     
-    particion = custom_particionador.particion(usuario_id)
+    particion = custom_particionador.particion({"usuario_id": usuario_id})
     
     # Obtener los datos del usuario de la base de datos MongoDB
     datos_usuario = await conversaciones_coleccion.find_one(
@@ -460,17 +488,19 @@ async def obtener_respuesta_chat(usuario_id: str):
     
     if "conversacion" not in datos_usuario:
         datos_usuario["conversacion"] = []
-        
-    particion_usuario = {
-        "usuario_id": usuario_id,
-        "tipo_usuario": datos_usuario.get("tipo_usuario"),
-        "nombre_usuario": datos_usuario.get("nombre_usuario"),
-        "username_usuario": usernameR,
-        "particion": particion
-    }
 
-    # Guardar la particion en la base de datos
-    await guardar_unico_documento(particion_usuario)
+    # Solo guardar la partición en la base de datos si el usuario es registrado
+    if datos_usuario.get("tipo_usuario") == TipoUsuario.Registrado:
+        particion_usuario = {
+            "usuario_id": usuario_id,
+            "tipo_usuario": datos_usuario.get("tipo_usuario"),
+            "nombre_usuario": datos_usuario.get("nombre_usuario"),
+            "username_usuario": usernameR,
+            "particion": particion
+        }
+
+        # Guardar la particion en la base de datos
+        await guardar_unico_documento(particion_usuario)
 
     conversacion_usuario = {
         "usuario_id": usuario_id,
@@ -499,7 +529,7 @@ async def obtener_respuesta_chat(usuario_id: str):
     
     productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
     
-    aumentar_particiones_si_es_necesario("historial_topic", particiones_coleccion)
+    await aumentar_particiones_si_es_necesario("historial_topic", particiones_coleccion)
     
     # Antes de enviar el mensaje a Kafka, calcular la partición a la que se asignará la clave
     print(f"Clave: {usuario_id}, Partición: {particion}")
@@ -931,6 +961,23 @@ async def obtener_historial(usuario_id: str):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+#Función que elimina la partición y el historial de los usuarios tipo anonimo 
+def eliminar_particion_y_historial(usuario_id: str, historial_consumidor, nombre_topic: str, admin_cliente):
+    try:
+        # Obtener la partición del usuario
+        particion_a_eliminar = obtener_particion_usuario(usuario_id, historial_consumidor, nombre_topic)
+
+        # Eliminar la partición
+        admin_cliente.delete_topics([nombre_topic + "-" + str(particion_a_eliminar)], operation_timeout=30)
+        print(f"Partición {particion_a_eliminar} eliminada con éxito.")
+
+        # Flushear los mensajes para asegurarse de que se envíen
+        historial_productor.flush()
+    
+    except Exception as e:
+        print(f"Error al eliminar la partición y el historial para el usuario {usuario_id}: {e}")
+        raise
 
 # Iniciar uvicorn 
 if __name__ == "__main__":
