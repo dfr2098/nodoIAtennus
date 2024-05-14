@@ -6,7 +6,7 @@ import random
 import string
 from kafka import KafkaConsumer, KafkaProducer, TopicPartition
 import uvicorn
-from Chatbot import predecir_clase, obtener_respuesta, intentos
+from chattbot import predecir_clase, obtener_respuesta, intentos
 from typing import Optional
 import datetime
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -20,10 +20,11 @@ from bson import ObjectId
 from pymongo import MongoClient
 import motor.motor_asyncio
 from pymongo.errors import PyMongoError
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter, Form
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from Autentificación import DURACION_TOKEN_ACCESO_EN_MINUTOS, TOKEN_ANONIMO_POR_DEFECTO, obtener_token, autenticar_usuario, obtener_conexion_db, crear_token_acceso, Token
+from Autentificación import DURACION_TOKEN_ACCESO_EN_MINUTOS, TOKEN_ANONIMO_POR_DEFECTO, obtener_token, autenticar_usuario, obtener_conexion_db, crear_token_acceso, Token, obtener_usuario_actual, DatosToken, obtener_hash_contrasena
 from datetime import timedelta
+from pydantic import BaseModel, EmailStr
 
 # Conexión a la base de datos de MongoDB asincrónica
 client = motor.motor_asyncio.AsyncIOMotorClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')
@@ -325,7 +326,7 @@ async def determinar_tipo_usuario(request: Request, call_next):
 
     return response
 
-
+"""
 # Endpoint que administra los tokens de autentificación
 @app.post("/Token", response_model=Token)
 async def iniciar_sesion_para_obtener_token_acceso(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -341,37 +342,193 @@ async def iniciar_sesion_para_obtener_token_acceso(form_data: OAuth2PasswordRequ
         datos={"sub": usuario.nombre_usuario}, duracion_delta=duracion_token_acceso
     )
     return {"token_acceso": token_acceso, "tipo_token": "bearer"}
+"""
+
+"""
+@app.post("/Token", response_model=Token)
+async def obtener_token_acceso(usuario: str = Form(None), contrasena: str = Form(None)):
+    if usuario and contrasena:
+        # Se proporcionaron credenciales de usuario, verificarlas
+        usuario_valido = autenticar_usuario(obtener_conexion_db(), usuario, contrasena)
+        if not usuario_valido:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuario o contraseña incorrectos",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # Si las credenciales son válidas, generar un token de acceso
+        datos_token = {"sub": usuario}
+    else:
+        # No se proporcionaron credenciales, usar el tipo de usuario anónimo
+        tipo_usuario_anonimo = TipoUsuario.Anonimo
+        datos_token = {"sub": tipo_usuario_anonimo}
+
+    # Generar y devolver el token de acceso
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+    
+    return {"token_acceso": token_acceso, "tipo_token": "bearer"}
+
 
 #endpoint para manejar sesiones
 @app.post("/Sesión")
 async def manejar_sesion(request: Request, token: str = Depends(obtener_token)):
-    if token == TOKEN_ANONIMO_POR_DEFECTO:
-        tipo_usuario = TipoUsuario.Anonimo
-    else:
+    # Intenta obtener el usuario actual a partir del token recibido en el encabezado de autorización
+    try:
+        usuario_actual = obtener_usuario_actual(token)
         tipo_usuario = TipoUsuario.Registrado
+    except:
+        # Si el token no es válido o no está presente, trata al usuario como anónimo
+        tipo_usuario = TipoUsuario.Anonimo
 
-    # Aquí se puede almacenar información sobre la sesión del usuario en una base de datos o en una variable de sesión
-    tipo_usuario = request.state.tipo_usuario
+    # Almacena el tipo de usuario en el estado de la solicitud
+    request.state.tipo_usuario = tipo_usuario
 
     if tipo_usuario == TipoUsuario.Anonimo:
-        # Generar el nombre y el username del usuario anónimo
+        # Genera el nombre y el username del usuario anónimo
         nombre_usuario = generar_nombre()
         username_usuario = generar_username()
 
         # Almacena la información del usuario anónimo en una variable de sesión
-        request.session["nombre_usuario"] = nombre_usuario
-        request.session["username_usuario"] = username_usuario
+        session_data = {"nombre_usuario": nombre_usuario, "username_usuario": username_usuario}
 
         # Permite que el usuario anónimo use el chat
         return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
     elif tipo_usuario == TipoUsuario.Registrado:
         # El usuario es registrado, realiza las acciones necesarias
-        pass
+        return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
+"""
 
-    return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
+class DatosUsuario:
+    def __init__(self, nombre_usuario: str, contrasena: str, email: str, user_name: str, id_user_name: str, ip_usuario: str = None):
+        self.nombre_usuario = nombre_usuario
+        self.contrasena = contrasena
+        self.email = email
+        self.user_name = user_name
+        self.id_user_name = id_user_name
+        self.ip_usuario = ip_usuario
+
+@app.post("/Registro")
+async def crear_usuario(
+    request: Request,
+    nombre_usuario: str = Form(...),
+    contrasena: str = Form(...),
+    email: str = Form(...),
+    user_name: str = Form(...),
+):
+    # Obtén la dirección IP del usuario
+    ip_usuario = request.client.host if request.client.host else None
+
+    # Verifica si el usuario ya existe en la base de datos
+    conexion_db = obtener_conexion_db()
+    cursor = conexion_db.cursor()
+    cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
+    username_existente = cursor.fetchone()
+    cursor.close()
+
+    if username_existente:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El nombre de usuario ya está en uso",
+        )
+
+    # Verifica si el correo electrónico ya existe en la base de datos
+    conexion_db = obtener_conexion_db()
+    cursor = conexion_db.cursor()
+    cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (email,))
+    email_existente = cursor.fetchone()
+    cursor.close()
+
+    if email_existente:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El correo electrónico ya está en uso",
+        )
+
+    # Crea un hash de la contraseña
+    contrasena_cifrada = obtener_hash_contrasena(contrasena)
+
+    # Genera un UUID para el campo id_user_name
+    id_user_name = generar_uuid(user_name)
+
+    # Almacena el usuario en la base de datos con tipo_usuario como "Registrado"
+    conexion_db = obtener_conexion_db()
+    cursor = conexion_db.cursor()
+    cursor.execute(
+        "INSERT INTO usuarios (user_name, nombre_usuario, contrasena, correo_electronico, id_user_name, tipo_usuario, ip_usuario) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (user_name, nombre_usuario, contrasena_cifrada, email, id_user_name, TipoUsuario.Registrado.value, ip_usuario),
+    )
+    conexion_db.commit()
+    cursor.close()
+
+    # Genera un token de acceso para el usuario recién creado
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    datos_token = {"sub": user_name}
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Devuelve el usuario creado, el id_user_name y el token de acceso
+    datos_usuario = DatosUsuario(nombre_usuario, email, user_name, id_user_name, ip_usuario)
+    return {
+        "usuario": datos_usuario,
+        "id_user_name": id_user_name,
+        "token_acceso": token_acceso,
+        "tipo_token": "bearer",
+    }
+
+async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
+    if nombre_usuario_o_correo and contrasena:
+        # Se proporcionaron credenciales de usuario, verificarlas
+        usuario_valido = autenticar_usuario(obtener_conexion_db(), nombre_usuario_o_correo, contrasena)
+        if not usuario_valido:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuario o contraseña incorrectos",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # Si las credenciales son válidas, generar un token de acceso
+        datos_token = {"sub": nombre_usuario_o_correo}
+    else:
+        # No se proporcionaron credenciales, usar el tipo de usuario anónimo
+        tipo_usuario_anonimo = TipoUsuario.Anonimo
+        datos_token = {"sub": tipo_usuario_anonimo}
+
+    # Generar y devolver el token de acceso
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Almacena el tipo de usuario en el estado de la solicitud
+    request.state.tipo_usuario = tipo_usuario_anonimo if not nombre_usuario_o_correo else TipoUsuario.Registrado
+
+    return {"token_acceso": token_acceso, "tipo_token": "bearer"}
 
 
-#Endpoint para recibir la respuesta del usuario
+@app.post("/token-y-sesion")
+async def manejar_sesion(request: Request, token_acceso: Optional[str] = Depends(obtener_token_acceso)):
+    try:
+        usuario_actual = obtener_usuario_actual(token_acceso)
+        tipo_usuario = TipoUsuario.Registrado
+    except:
+        # Si el token no es válido o no está presente, trata al usuario como anónimo
+        tipo_usuario = TipoUsuario.Anonimo
+
+    # Almacena el tipo de usuario en el estado de la solicitud
+    request.state.tipo_usuario = tipo_usuario
+
+    if tipo_usuario == TipoUsuario.Anonimo:
+        # Genera el nombre y el username del usuario anónimo
+        nombre_usuario = generar_nombre()
+        username_usuario = generar_username()
+
+        # Almacena la información del usuario anónimo en una variable de sesión
+        session_data = {"nombre_usuario": nombre_usuario, "username_usuario": username_usuario}
+
+        # Permite que el usuario anónimo use el chat
+        return {"token_acceso": token_acceso, "mensaje": f"Bienvenido, {tipo_usuario.value}!"}
+    elif tipo_usuario == TipoUsuario.Registrado:
+        # El usuario es registrado, realiza las acciones necesarias
+        return {"token_acceso": token_acceso, "mensaje": f"Bienvenido, {tipo_usuario.value}!"}
+
+
 @app.get("/Chat")
 async def chat(
     request: Request,

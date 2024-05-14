@@ -35,10 +35,10 @@ TOKEN_ANONIMO_POR_DEFECTO = jwt.encode({"sub": "anonimo"}, CLAVE_SECRETA, algori
 def obtener_conexion_db():
     return mysql.connector.connect(**config)
 
-# Obtiener un usuario de la base de datos
-def obtener_usuario(conexion_db, id_usuario_o_nombre_usuario):
+# Obtener un usuario de la base de datos
+def obtener_usuario(conexion_db, user_name_or_email, contrasena):
     cursor = conexion_db.cursor()
-    cursor.execute("SELECT * FROM usuario WHERE id_usuario=%s OR nombre_usuario=%s", (id_usuario_o_nombre_usuario, id_usuario_o_nombre_usuario))
+    cursor.execute("SELECT * FROM usuarios WHERE (correo_electronico=%s OR user_name=%s) AND contrasena=%s", (user_name_or_email, user_name_or_email, contrasena))
     usuario = cursor.fetchone()
     cursor.close()
     return usuario
@@ -67,12 +67,10 @@ def obtener_token(token: str = Depends(esquema_oauth2)):
     else:
         return token
     
-# Autenticar un usuario
-def autenticar_usuario(conexion_db, nombre_usuario, contrasena):
-    usuario = obtener_usuario(conexion_db, nombre_usuario)
+# Autentificar un usuario
+def autenticar_usuario(conexion_db, user_name_o_correo, contrasena):
+    usuario = obtener_usuario(conexion_db, user_name_o_correo, contrasena)
     if not usuario:
-        return False
-    if not verificar_contrasena(contrasena, usuario.contrasena):
         return False
     return usuario
 
