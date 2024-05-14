@@ -6,7 +6,7 @@ import random
 import string
 from kafka import KafkaConsumer, KafkaProducer, TopicPartition
 import uvicorn
-from chattbot import predecir_clase, obtener_respuesta, intentos
+from Chatbot import predecir_clase, obtener_respuesta, intentos
 from typing import Optional
 import datetime
 from uuid import NAMESPACE_URL, UUID, uuid5
