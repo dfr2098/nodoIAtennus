@@ -37,11 +37,21 @@ def obtener_conexion_db():
 
 # Obtener un usuario de la base de datos
 def obtener_usuario(conexion_db, user_name_or_email, contrasena):
-    cursor = conexion_db.cursor()
-    cursor.execute("SELECT * FROM usuarios WHERE (correo_electronico=%s OR user_name=%s) AND contrasena=%s", (user_name_or_email, user_name_or_email, contrasena))
+    cursor = conexion_db.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM usuarios WHERE correo_electronico=%s OR user_name=%s", (user_name_or_email, user_name_or_email))
     usuario = cursor.fetchone()
     cursor.close()
-    return usuario
+
+    if not usuario:
+        return None  # Usuario no encontrado
+
+    hash_almacenado = usuario["contrasena"]  # Suponiendo que el campo se llama "contrasena"
+
+    # Verificar la contraseña
+    if verificar_contrasena(contrasena, hash_almacenado):
+        return usuario  # Usuario autenticado
+    else:
+        return None  # Contraseña incorrecta
 
 # Verificar una contraseña
 def verificar_contrasena(contrasena_texto_plano, contrasena_cifrada):
