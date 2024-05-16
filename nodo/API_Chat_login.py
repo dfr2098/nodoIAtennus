@@ -399,23 +399,40 @@ async def manejar_sesion(request: Request, token: str = Depends(obtener_token)):
         return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
 """
 
-class DatosUsuario:
-    def __init__(self, nombre_usuario: str, contrasena: str, email: str, user_name: str, id_user_name: str, ip_usuario: str = None):
-        self.nombre_usuario = nombre_usuario
-        self.contrasena = contrasena
-        self.email = email
-        self.user_name = user_name
-        self.id_user_name = id_user_name
-        self.ip_usuario = ip_usuario
+class DatosUsuario(BaseModel):
+    nombre_usuario: str
+    contrasena: str
+    email: EmailStr
+    user_name: str
+    id_user_name: str
+    ip_usuario: str = None
+
+"""
+class DatosUsuario(BaseModel):
+    nombre_usuario: str
+    contrasena: str
+    email: EmailStr
+    user_name: str = Field(..., min_length=1, max_length=15, pattern=r'^\S+$')
+    id_user_name: str
+    ip_usuario: str = None
+"""
 
 @app.post("/Registro")
 async def crear_usuario(
     request: Request,
     nombre_usuario: str = Form(...),
     contrasena: str = Form(...),
-    email: str = Form(...),
-    user_name: str = Form(...),
+    confirmar_contrasena: str = Form(...),  # Nueva entrada para confirmar la contraseña
+    email: EmailStr = Form(...),
+    user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El nombre de usuario debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),  # Incluir user_name como un campo de formulario con restricciones de longitud y sin espacios en blanco),
 ):
+    # Verifica si las contraseñas coinciden
+    if contrasena != confirmar_contrasena:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Las contraseñas no coinciden",
+        )
+
     # Obtén la dirección IP del usuario
     ip_usuario = request.client.host if request.client.host else None
 
@@ -467,7 +484,15 @@ async def crear_usuario(
     token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
 
     # Devuelve el usuario creado, el id_user_name y el token de acceso
-    datos_usuario = DatosUsuario(nombre_usuario, email, user_name, id_user_name, ip_usuario)
+    datos_usuario = DatosUsuario(
+    nombre_usuario=nombre_usuario,
+    contrasena="****",  # Proporciona un valor de marcador de posición para el campo de contraseña
+    email=email,
+    user_name=user_name,
+    id_user_name=id_user_name,
+    ip_usuario=ip_usuario
+    )
+    
     return {
         "usuario": datos_usuario,
         "id_user_name": id_user_name,
@@ -475,6 +500,7 @@ async def crear_usuario(
         "tipo_token": "bearer",
     }
 
+"""
 async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
     if nombre_usuario_o_correo and contrasena:
         # Se proporcionaron credenciales de usuario, verificarlas
@@ -505,7 +531,7 @@ async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, co
 @app.post("/token-y-sesion")
 async def manejar_sesion(request: Request, token_acceso: Optional[str] = Depends(obtener_token_acceso)):
     try:
-        usuario_actual = obtener_usuario_actual(token_acceso)
+        #usuario_actual = obtener_usuario_actual(token_acceso)
         tipo_usuario = TipoUsuario.Registrado
     except:
         # Si el token no es válido o no está presente, trata al usuario como anónimo
@@ -527,6 +553,141 @@ async def manejar_sesion(request: Request, token_acceso: Optional[str] = Depends
     elif tipo_usuario == TipoUsuario.Registrado:
         # El usuario es registrado, realiza las acciones necesarias
         return {"token_acceso": token_acceso, "mensaje": f"Bienvenido, {tipo_usuario.value}!"}
+"""
+
+"""
+async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
+    if nombre_usuario_o_correo is not None and contrasena is not None:
+        # Se proporcionaron credenciales de usuario, verificarlas
+        usuario_valido = autenticar_usuario(obtener_conexion_db(), nombre_usuario_o_correo, contrasena)
+        if not usuario_valido:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuario o contraseña incorrectos",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # Si las credenciales son válidas, generar un token de acceso
+        datos_token = {"sub": nombre_usuario_o_correo}
+        tipo_usuario = TipoUsuario.Registrado  # Actualizar el tipo de usuario
+
+        # Obtener el nombre del usuario registrado
+        nombre_usuario = usuario_valido['nombre_usuario']  # Aquí debes reemplazar 'nombre' con el campo correcto de la base de datos
+
+        # Devolver el nombre del usuario junto con el tipo de usuario
+        datos_token.update({"nombre_usuario": nombre_usuario})
+    elif nombre_usuario_o_correo is not None:
+        # Se proporcionó solo nombre de usuario o correo
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Por favor, ingresa también tu contraseña",
+        )
+    elif contrasena is not None:
+        # Se proporcionó solo contraseña
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Por favor, ingresa tu correo o nombre de usuario",
+        )
+    else:
+        # No se proporcionaron credenciales, usar el tipo de usuario anónimo
+        tipo_usuario = TipoUsuario.Anonimo
+        datos_token = {"sub": tipo_usuario}
+
+    # Generar y devolver el token de acceso
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Almacena el tipo de usuario en el estado de la solicitud
+    request.state.tipo_usuario = tipo_usuario
+
+    return {"token_acceso": token_acceso, "tipo_token": "bearer", "nombre_usuario": nombre_usuario if tipo_usuario == TipoUsuario.Registrado else None}
+"""
+
+async def verificar_usuarios_registrados(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
+    if nombre_usuario_o_correo is None and contrasena is None:
+        # Ninguno de los campos está lleno, lanzar una excepción
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Por favor, ingresa tu nombre de usuario o correo y tu contraseña",
+        )
+
+    if nombre_usuario_o_correo and contrasena:
+        # Se proporcionaron credenciales de usuario, verificarlas
+        usuario_valido = autenticar_usuario(obtener_conexion_db(), nombre_usuario_o_correo, contrasena)
+        if not usuario_valido:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuario o contraseña incorrectos",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # Si las credenciales son válidas, generar un token de acceso
+        datos_token = {"sub": nombre_usuario_o_correo}
+        tipo_usuario = TipoUsuario.Registrado  # Actualizar el tipo de usuario
+
+        # Obtener el nombre del usuario registrado
+        nombre_usuario = usuario_valido['nombre_usuario']  # Aquí debes reemplazar 'nombre' con el campo correcto de la base de datos
+
+        # Devolver el nombre del usuario junto con el tipo de usuario
+        datos_token.update({"nombre_usuario": nombre_usuario})
+    elif nombre_usuario_o_correo:
+        # Se proporcionó solo nombre de usuario o correo
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Por favor, ingresa también tu contraseña",
+        )
+    elif contrasena:
+        # Se proporcionó solo contraseña
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Por favor, ingresa tu correo o nombre de usuario",
+        )
+
+    # Generar y devolver el token de acceso
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Almacena el tipo de usuario en el estado de la solicitud
+    request.state.tipo_usuario = tipo_usuario
+
+    return {"token_acceso": token_acceso, "tipo_token": "bearer", "nombre_usuario": nombre_usuario if tipo_usuario == TipoUsuario.Registrado else None}
+
+
+@app.post("/Sesión_Anónima")
+async def obtener_token_para_anonimos(request: Request):
+    # No se requieren credenciales, usar el tipo de usuario anónimo
+    tipo_usuario = TipoUsuario.Anonimo
+    datos_token = {"sub": tipo_usuario}
+
+    # Generar el nombre y el username del usuario anónimo
+    nombre_usuario_anonimo = generar_nombre()
+    username_usuario_anonimo = generar_username()
+
+    # Generar y devolver el token de acceso
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Almacena el tipo de usuario en el estado de la solicitud
+    request.state.tipo_usuario = tipo_usuario
+
+    return {
+        "token_acceso": token_acceso,
+        "tipo_token": "bearer",
+        "tipo_usuario": tipo_usuario.value,
+        "tipo_usuario": nombre_usuario_anonimo,
+        "tipo_usuario": username_usuario_anonimo,
+        "mensaje": f"Bienvenido, {tipo_usuario.value}!"
+    }
+
+
+@app.post("/Iniciar_Sesión")
+async def manejar_sesion(token_acceso: Optional[str] = Depends(verificar_usuarios_registrados)):
+    nombre_usuario = token_acceso.get("nombre_usuario")
+
+    if nombre_usuario:
+        # El usuario es registrado, realizar las acciones necesarias
+        return {"token_acceso": token_acceso, "mensaje": f"Bienvenido, {nombre_usuario}!"}
+    else:
+        # Manejar el caso cuando no hay un nombre de usuario (por ejemplo, usuario anónimo)
+        return {"token_acceso": token_acceso, "mensaje": "Bienvenido"}
 
 
 @app.get("/Chat")
