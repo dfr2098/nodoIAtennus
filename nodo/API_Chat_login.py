@@ -24,7 +24,12 @@ from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter,
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from Autentificación import DURACION_TOKEN_ACCESO_EN_MINUTOS, TOKEN_ANONIMO_POR_DEFECTO, obtener_token, autenticar_usuario, obtener_conexion_db, crear_token_acceso, Token, obtener_usuario_actual, DatosToken, obtener_hash_contrasena
 from datetime import timedelta
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator, ValidationError, model_validator
+from email_validator import validate_email, EmailNotValidError
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+import re
+from typing import Annotated
 
 # Conexión a la base de datos de MongoDB asincrónica
 client = motor.motor_asyncio.AsyncIOMotorClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')
@@ -399,6 +404,50 @@ async def manejar_sesion(request: Request, token: str = Depends(obtener_token)):
         return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
 """
 
+class RegistroUsuario(BaseModel):
+    nombre_usuario: str = Field(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
+    contrasena: str = Field(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 20 caracteres"),
+    confirmar_contrasena: str = Field(..., min_length=5, max_length=15, description="Repetir contraseña"),
+    email: EmailStr = Field(..., description="Ingresa un correo"),
+    user_name: str = Field(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),  # Incluir user_name como un campo de formulario con restricciones de longitud y sin espacios en blanco),
+    
+    @model_validator(mode='after')
+    def no_espacios_en_nombre_de_usuario(valor: str) -> str:
+        if not re.match(r'^\S+$', valor):
+            raise ValueError('El nombre de usuario no puede contener espacios en blanco')
+        return valor
+
+    @model_validator(mode='after')
+    def contrasenas_coinciden(contrasena: str, confirmar_contrasena: str) -> None:
+        if contrasena != confirmar_contrasena:
+            raise ValueError('Las contraseñas no coinciden')
+    
+    @model_validator(mode='after')
+    def validar_longitud_nombre(nombre_usuario: str) -> None:
+        if len(nombre_usuario) < 5:
+            raise ValueError('El nombre de usuario debe tener al menos 5 caracteres')
+        
+    @model_validator(mode='after')
+    def validar_longitud_username(user_name: str) -> None:
+        if len(user_name) < 5:
+            raise ValueError('El username debe tener al menos 5 caracteres')
+    
+    @model_validator(mode='after')
+    def correo_correcto(valor: EmailStr) -> EmailStr:
+        try:
+            validate_email(valor)
+        except EmailNotValidError as e:
+            raise ValueError('El correo proporcionado no es correcto')
+        return valor
+        
+class UsuarioCreado(BaseModel):
+    nombre_usuario: str
+    contrasena: str
+    correo: EmailStr
+    user_name: str
+    id_nombre_usuario: str
+    ip_usuario: str = None
+
 class DatosUsuario(BaseModel):
     nombre_usuario: str
     contrasena: str
@@ -406,6 +455,194 @@ class DatosUsuario(BaseModel):
     user_name: str
     id_user_name: str
     ip_usuario: str = None
+    
+"""
+@app.post("/Registro")
+async def crear_usuario(
+    request: Request,
+    nombre_usuario: Annotated[str, Form(min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres")],
+    contrasena: Annotated[str, Form(min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 15 caracteres")],
+    confirmar_contrasena: Annotated[str, Form(min_length=5, max_length=15, description="Repetir contraseña")],
+    correo: Annotated[str, Form(description="Ingresar un correo")],
+    user_name: Annotated[str, Form(min_length=5, max_length=15, description="El nombre de usuario debe tener entre 5 y 15 caracteres y no puede contener espacios en blanco")]
+):
+    try:
+        # Valida las contraseñas
+        RegistroUsuario.contrasenas_coinciden(contrasena, confirmar_contrasena)
+
+        # Valida longitudes de nombres de usuario
+        RegistroUsuario.validar_longitudes(nombre_usuario, user_name)
+
+        # Valida espacios en nombre de usuario
+        RegistroUsuario.no_espacios_en_nombre_de_usuario(user_name)
+        
+        # Valida espacios en nombre de usuario
+        RegistroUsuario.correo_correcto(correo)
+
+        # Obtén la dirección IP del usuario
+        ip_usuario = request.client.host if request.client.host else None
+
+        # Verifica si el usuario ya existe en la base de datos
+        conexion_db = obtener_conexion_db()
+        cursor = conexion_db.cursor()
+        cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
+        nombre_de_usuario_existente = cursor.fetchone()
+        if nombre_de_usuario_existente:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="El nombre de usuario ya está en uso",
+            )
+
+        cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (correo,))
+        correo_existente = cursor.fetchone()
+        if correo_existente:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="El correo electrónico ya está en uso",
+            )
+        cursor.close()
+
+        # Crea un hash de la contraseña
+        contrasena_cifrada = obtener_hash_contrasena(contrasena)
+
+        # Genera un UUID para el campo id_nombre_usuario
+        id_nombre_usuario = generar_uuid(user_name)
+
+        # Almacena el usuario en la base de datos con tipo_usuario como "Registrado"
+        cursor = conexion_db.cursor()
+        cursor.execute(
+            "INSERT INTO usuarios (user_name, nombre_usuario, contrasena, correo_electronico, id_nombre_usuario, tipo_usuario, ip_usuario) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (user_name, nombre_usuario, contrasena_cifrada, correo, id_nombre_usuario, TipoUsuario.Registrado.value, ip_usuario),
+        )
+        conexion_db.commit()
+        cursor.close()
+
+        # Genera un token de acceso para el usuario recién creado
+        duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+        datos_token = {"sub": user_name}
+        token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+        # Devuelve el usuario creado, el id_nombre_usuario y el token de acceso
+        datos_usuario = UsuarioCreado(
+            nombre_usuario=nombre_usuario,
+            contrasena="****",  # Proporciona un valor de marcador de posición para el campo de contraseña
+            correo=correo,
+            user_name=user_name,
+            id_nombre_usuario=id_nombre_usuario,
+            ip_usuario=ip_usuario
+        )
+
+        return {
+            "usuario": datos_usuario,
+            "id_nombre_usuario": id_nombre_usuario,
+            "token_acceso": token_acceso,
+            "tipo_token": "bearer",
+        }
+    except ValidationError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=jsonable_encoder({"detalle": e.errors()}),
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=jsonable_encoder({"mensaje": f"Error al crear el usuario: {str(e)}"}),
+        )
+"""
+
+@app.post("/Registro")
+async def crear_usuario(
+    request: Request,
+    nombre_usuario: str = Form(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
+    contrasena: str = Form(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 20 caracteres"),
+    confirmar_contrasena: str = Form(..., min_length=5, max_length=15, description="Repetir contraseña"),
+    email: EmailStr = Form(..., description="Ingresa un correo"),
+    user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),  # Incluir user_name como un campo de formulario con restricciones de longitud y sin espacios en blanco),
+):
+   
+    usuario = RegistroUsuario()
+
+    # Valida las contraseñas
+    usuario.contrasenas_coinciden(contrasena, confirmar_contrasena)
+
+    # Valida longitudes de nombres de usuario
+    usuario.validar_longitud_nombre(nombre_usuario)
+    
+    # Valida longitudes de nombres de usuario
+    usuario.validar_longitud_username(user_name)
+
+    # Valida espacios en nombre de usuario
+    usuario.no_espacios_en_nombre_de_usuario(user_name)
+        
+    # Valida espacios en nombre de usuario
+    usuario.correo_correcto(email)
+
+    # Obtén la dirección IP del usuario
+    ip_usuario = request.client.host if request.client.host else None
+
+    # Verifica si el usuario ya existe en la base de datos
+    conexion_db = obtener_conexion_db()
+    cursor = conexion_db.cursor()
+    cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
+    username_existente = cursor.fetchone()
+    cursor.close()
+
+    if username_existente:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El nombre de usuario ya está en uso",
+        )
+
+    # Verifica si el correo electrónico ya existe en la base de datos
+    conexion_db = obtener_conexion_db()
+    cursor = conexion_db.cursor()
+    cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (email,))
+    email_existente = cursor.fetchone()
+    cursor.close()
+
+    if email_existente:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El correo electrónico ya está en uso",
+        )
+
+    # Crea un hash de la contraseña
+    contrasena_cifrada = obtener_hash_contrasena(contrasena)
+
+    # Genera un UUID para el campo id_user_name
+    id_user_name = generar_uuid(user_name)
+
+    # Almacena el usuario en la base de datos con tipo_usuario como "Registrado"
+    conexion_db = obtener_conexion_db()
+    cursor = conexion_db.cursor()
+    cursor.execute(
+        "INSERT INTO usuarios (user_name, nombre_usuario, contrasena, correo_electronico, id_user_name, tipo_usuario, ip_usuario) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (user_name, nombre_usuario, contrasena_cifrada, email, id_user_name, TipoUsuario.Registrado.value, ip_usuario),
+    )
+    conexion_db.commit()
+    cursor.close()
+
+    # Genera un token de acceso para el usuario recién creado
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    datos_token = {"sub": user_name}
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Devuelve el usuario creado, el id_user_name y el token de acceso
+    datos_usuario = DatosUsuario(
+    nombre_usuario=nombre_usuario,
+    contrasena="****",  # Proporciona un valor de marcador de posición para el campo de contraseña
+    email=email,
+    user_name=user_name,
+    id_user_name=id_user_name,
+    ip_usuario=ip_usuario
+    )
+    
+    return {
+        "usuario": datos_usuario,
+        "id_user_name": id_user_name,
+        "token_acceso": token_acceso,
+        "tipo_token": "bearer",
+    }
 
 """
 class DatosUsuario(BaseModel):
@@ -417,6 +654,7 @@ class DatosUsuario(BaseModel):
     ip_usuario: str = None
 """
 
+"""FUNCIONA BIEN
 @app.post("/Registro")
 async def crear_usuario(
     request: Request,
@@ -499,6 +737,7 @@ async def crear_usuario(
         "token_acceso": token_acceso,
         "tipo_token": "bearer",
     }
+"""    
 
 """
 async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
