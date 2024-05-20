@@ -1113,3 +1113,22 @@
 2024-05-18 21:14:14,743 INFO spawned: 'jupyter' with pid 10
 2024-05-18 21:14:15,756 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
 2024-05-18 21:14:15,757 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-05-19 16:40:36,191 CRIT could not write pidfile /nodo/supervisord.pid
+2024-05-19 16:40:37,217 INFO spawned: 'fastapi' with pid 9
+2024-05-19 16:40:37,220 INFO spawned: 'jupyter' with pid 10
+2024-05-19 16:40:38,415 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-05-19 16:40:38,415 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-05-19 19:56:09,047 CRIT could not write pidfile /nodo/supervisord.pid
+2024-05-19 19:56:10,065 INFO spawned: 'fastapi' with pid 8
+2024-05-19 19:56:10,084 INFO spawned: 'jupyter' with pid 9
+2024-05-19 19:56:11,137 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-05-19 19:56:11,141 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-05-19 20:45:30,258 WARN received SIGTERM indicating exit request
+2024-05-19 20:45:30,323 INFO waiting for fastapi, jupyter to die
+2024-05-19 20:45:31,414 INFO stopped: jupyter (exit status 0)
+2024-05-19 20:45:32,186 INFO stopped: fastapi (exit status 0)
+2024-05-20 18:25:06,502 CRIT could not write pidfile /nodo/supervisord.pid
+2024-05-20 18:25:07,542 INFO spawned: 'fastapi' with pid 9
+2024-05-20 18:25:07,595 INFO spawned: 'jupyter' with pid 10
+2024-05-20 18:25:08,640 INFO success: fastapi entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2024-05-20 18:25:08,645 INFO success: jupyter entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
