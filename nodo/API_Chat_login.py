@@ -20,9 +20,16 @@ from bson import ObjectId
 from pymongo import MongoClient
 import motor.motor_asyncio
 from pymongo.errors import PyMongoError
-from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter, Form
+from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter, Form, Response, Header
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from Autentificación import DURACION_TOKEN_ACCESO_EN_MINUTOS, TOKEN_ANONIMO_POR_DEFECTO, obtener_token, autenticar_usuario, obtener_conexion_db, crear_token_acceso, Token, obtener_usuario_actual, DatosToken, obtener_hash_contrasena
+from Autentificacion import (
+    autenticar_usuario,
+    crear_token_acceso,
+    obtener_conexion_db,
+    DURACION_TOKEN_ACCESO_EN_MINUTOS,
+    obtener_hash_contrasena,
+    CLAVE_SECRETA, ALGORITMO, obtener_usuario_por_identificador
+)
 from datetime import timedelta
 from pydantic import BaseModel, EmailStr, Field, field_validator, ValidationError, model_validator
 from email_validator import validate_email, EmailNotValidError
@@ -30,6 +37,11 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 import re
 from typing import Annotated
+import requests
+import jwt 
+from jose import JWTError
+import logging
+
 
 # Conexión a la base de datos de MongoDB asincrónica
 client = motor.motor_asyncio.AsyncIOMotorClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')
@@ -41,6 +53,7 @@ particiones_coleccion = db["Particiones"]
 #Configuración del entorno y de las variables
 #Iniciar FastAPI
 app = FastAPI()
+
 
 # URL del servidor Kafka Connect
 kafka_connect_url = "http://localhost:8084/connectors"
@@ -402,7 +415,7 @@ async def manejar_sesion(request: Request, token: str = Depends(obtener_token)):
     elif tipo_usuario == TipoUsuario.Registrado:
         # El usuario es registrado, realiza las acciones necesarias
         return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
-"""
+
 
 class RegistroUsuario(BaseModel):
     nombre_usuario: str = Field(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
@@ -439,7 +452,8 @@ class RegistroUsuario(BaseModel):
         except EmailNotValidError as e:
             raise ValueError('El correo proporcionado no es correcto')
         return valor
-        
+"""
+     
 class UsuarioCreado(BaseModel):
     nombre_usuario: str
     contrasena: str
@@ -548,7 +562,7 @@ async def crear_usuario(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=jsonable_encoder({"mensaje": f"Error al crear el usuario: {str(e)}"}),
         )
-"""
+
 
 @app.post("/Registro")
 async def crear_usuario(
@@ -643,32 +657,90 @@ async def crear_usuario(
         "token_acceso": token_acceso,
         "tipo_token": "bearer",
     }
-
 """
+ 
+def lanzar_excepcion_personalizada(mensaje: str):
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=mensaje
+    )
+
+class RegistroUsuario(BaseModel):
+    nombre_usuario: str = Field(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres")
+    contrasena: str = Field(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 15 caracteres")
+    confirmar_contrasena: str = Field(..., min_length=5, max_length=15, description="Repetir contraseña")
+    email: EmailStr = Field(..., description="Ingresa un correo")
+    user_name: str = Field(..., min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco")
+
+    @model_validator(mode='before')
+    def validar_campos(cls, values):
+        nombre_usuario = values.get('nombre_usuario')
+        contrasena = values.get('contrasena')
+        confirmar_contrasena = values.get('confirmar_contrasena')
+        email = values.get('email')
+        user_name = values.get('user_name')
+        
+        if len(nombre_usuario) < 5 or len(nombre_usuario) > 20:
+            lanzar_excepcion_personalizada("El nombre de usuario debe tener entre 5 y 20 caracteres")
+        
+        if len(contrasena) < 5 or len(contrasena) > 15:
+            lanzar_excepcion_personalizada("La contraseña debe tener entre 5 y 15 caracteres")
+        
+        if contrasena != confirmar_contrasena:
+            lanzar_excepcion_personalizada("Las contraseñas no coinciden")
+        
+        if len(user_name) < 1 or len(user_name) > 15:
+            lanzar_excepcion_personalizada("El username debe tener entre 1 y 15 caracteres")
+        
+        if re.search(r'\s', user_name):
+            lanzar_excepcion_personalizada("El username no puede contener espacios en blanco")
+        
+        try:
+            validate_email(email)
+        except EmailNotValidError:
+            lanzar_excepcion_personalizada("El correo proporcionado no es correcto")
+        
+        return values
+
 class DatosUsuario(BaseModel):
     nombre_usuario: str
     contrasena: str
     email: EmailStr
-    user_name: str = Field(..., min_length=1, max_length=15, pattern=r'^\S+$')
+    user_name: str
     id_user_name: str
-    ip_usuario: str = None
-"""
+    ip_usuario: Optional[str] = None
 
-"""FUNCIONA BIEN
+# Definición del modelo de datos del usuario
+class DatosU(BaseModel):
+    nombre_usuario: str
+    correo_electronico: str
+    user_name: str
+    id_user_name: str
+
 @app.post("/Registro")
 async def crear_usuario(
     request: Request,
-    nombre_usuario: str = Form(...),
-    contrasena: str = Form(...),
-    confirmar_contrasena: str = Form(...),  # Nueva entrada para confirmar la contraseña
-    email: EmailStr = Form(...),
-    user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El nombre de usuario debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),  # Incluir user_name como un campo de formulario con restricciones de longitud y sin espacios en blanco),
+    nombre_usuario: str = Form(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
+    contrasena: str = Form(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 15 caracteres"),
+    confirmar_contrasena: str = Form(..., min_length=5, max_length=15, description="Repetir contraseña"),
+    email: EmailStr = Form(..., description="Ingresa un correo"),
+    user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco")
 ):
-    # Verifica si las contraseñas coinciden
-    if contrasena != confirmar_contrasena:
+
+    try:
+        RegistroUsuario(
+            nombre_usuario=nombre_usuario,
+            contrasena=contrasena,
+            confirmar_contrasena=confirmar_contrasena,
+            email=email,
+            user_name=user_name
+        )
+    except HTTPException as e:
+        raise e
+    except ValidationError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Las contraseñas no coinciden",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.errors()
         )
 
     # Obtén la dirección IP del usuario
@@ -723,12 +795,12 @@ async def crear_usuario(
 
     # Devuelve el usuario creado, el id_user_name y el token de acceso
     datos_usuario = DatosUsuario(
-    nombre_usuario=nombre_usuario,
-    contrasena="****",  # Proporciona un valor de marcador de posición para el campo de contraseña
-    email=email,
-    user_name=user_name,
-    id_user_name=id_user_name,
-    ip_usuario=ip_usuario
+        nombre_usuario=nombre_usuario,
+        contrasena="****",  # Proporciona un valor de marcador de posición para el campo de contraseña
+        email=email,
+        user_name=user_name,
+        id_user_name=id_user_name,
+        ip_usuario=ip_usuario
     )
     
     return {
@@ -737,8 +809,7 @@ async def crear_usuario(
         "token_acceso": token_acceso,
         "tipo_token": "bearer",
     }
-"""    
-
+        
 """
 async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
     if nombre_usuario_o_correo and contrasena:
@@ -794,8 +865,14 @@ async def manejar_sesion(request: Request, token_acceso: Optional[str] = Depends
         return {"token_acceso": token_acceso, "mensaje": f"Bienvenido, {tipo_usuario.value}!"}
 """
 
-"""
-async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
+
+
+# Esquema de OAuth2 para validar tokens de acceso JWT
+esquemaa_oauth2 = OAuth2PasswordBearer(tokenUrl="/token")
+
+
+@app.post("/Token")
+def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
     if nombre_usuario_o_correo is not None and contrasena is not None:
         # Se proporcionaron credenciales de usuario, verificarlas
         usuario_valido = autenticar_usuario(obtener_conexion_db(), nombre_usuario_o_correo, contrasena)
@@ -834,159 +911,259 @@ async def obtener_token_acceso(nombre_usuario_o_correo: Optional[str] = None, co
     # Generar y devolver el token de acceso
     duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
     token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+    
 
     # Almacena el tipo de usuario en el estado de la solicitud
     request.state.tipo_usuario = tipo_usuario
 
     return {"token_acceso": token_acceso, "tipo_token": "bearer", "nombre_usuario": nombre_usuario if tipo_usuario == TipoUsuario.Registrado else None}
-"""
 
-async def verificar_usuarios_registrados(nombre_usuario_o_correo: Optional[str] = None, contrasena: Optional[str] = None, request: Request = None):
-    if nombre_usuario_o_correo is None and contrasena is None:
-        # Ninguno de los campos está lleno, lanzar una excepción
+"""
+@app.post("/token")
+def obtener_token_acceso(request: Request = None, form_data: OAuth2PasswordRequestForm = Depends()):
+    usuario_valido = autenticar_usuario(obtener_conexion_db(), form_data.username, form_data.password)
+    if not usuario_valido:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Por favor, ingresa tu nombre de usuario o correo y tu contraseña",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if nombre_usuario_o_correo and contrasena:
-        # Se proporcionaron credenciales de usuario, verificarlas
-        usuario_valido = autenticar_usuario(obtener_conexion_db(), nombre_usuario_o_correo, contrasena)
+    datos_token = {"sub": form_data.username}
+    tipo_usuario = TipoUsuario.Registrado
+
+    nombre_usuario = usuario_valido['nombre_usuario']
+    datos_token.update({"nombre_usuario": nombre_usuario})
+
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    request.state.tipo_usuario = tipo_usuario
+
+    return {"token_acceso": token_acceso, "tipo_token": "bearer", "nombre_usuario": nombre_usuario}
+
+
+
+async def obtener_usu(token: str = Depends(esquemaa_oauth2)):
+    try:
+        carga_util = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
+        username = carga_util.get("sub")
+        if username == None:
+            raise HTTPException(status_code=401, detail="No se pudieron validar las credenciales", headers={"WWW-Authenticate": "Bearer"})
+    except JWTError:
+        raise HTTPException(status_code=401, detail="No se pudieron validar las credenciales", headers={"WWW-Authenticate": "Bearer"})
+    usuario = obtener_usuario_por_id(username)
+    if not usuario:
+        raise HTTPException(status_code=401, detail="No se pudieron validar las credenciales", headers={"WWW-Authenticate": "Bearer"})
+    return usuario
+
+async def obtener_usuario_actual(token: str = Depends(esquemaa_oauth2)) -> DatosU:
+    try:
+        carga_util = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
+        tipo_usuario = carga_util.get("sub")
+        
+        if tipo_usuario == TipoUsuario.Anonimo.value:
+            return DatosU(
+                nombre_usuario=carga_util.get("nombre_usuario"),
+                email=None,
+                user_name=carga_util.get("user_name"),
+                id_user_name=carga_util.get("id_user_name")
+            )
+        
+        id_user_name = carga_util.get("sub")
+        if id_user_name is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No se pudo validar el token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        usuario = obtener_usuario_por_id(id_user_name)
+        if usuario is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuario no encontrado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return usuario
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido o expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )   
+"""
+
+@app.post("/token", operation_id="obtener_token_acceso")
+def obtener_token_acceso(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
+        usuario_valido = autenticar_usuario(obtener_conexion_db(), form_data.username, form_data.password)
         if not usuario_valido:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Usuario o contraseña incorrectos",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        # Si las credenciales son válidas, generar un token de acceso
-        datos_token = {"sub": nombre_usuario_o_correo}
-        tipo_usuario = TipoUsuario.Registrado  # Actualizar el tipo de usuario
 
-        # Obtener el nombre del usuario registrado
-        nombre_usuario = usuario_valido['nombre_usuario']  # Aquí debes reemplazar 'nombre' con el campo correcto de la base de datos
-
-        # Devolver el nombre del usuario junto con el tipo de usuario
+        datos_token = {"sub": form_data.username}
+        nombre_usuario = usuario_valido['nombre_usuario']
         datos_token.update({"nombre_usuario": nombre_usuario})
-    elif nombre_usuario_o_correo:
-        # Se proporcionó solo nombre de usuario o correo
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Por favor, ingresa también tu contraseña",
-        )
-    elif contrasena:
-        # Se proporcionó solo contraseña
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Por favor, ingresa tu correo o nombre de usuario",
-        )
 
-    # Generar y devolver el token de acceso
-    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
-    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+        duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+        token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
 
-    # Almacena el tipo de usuario en el estado de la solicitud
-    request.state.tipo_usuario = tipo_usuario
+        return {"token_acceso": token_acceso, "tipo_token": "bearer", "nombre_usuario": nombre_usuario}
 
-    return {"token_acceso": token_acceso, "tipo_token": "bearer", "nombre_usuario": nombre_usuario if tipo_usuario == TipoUsuario.Registrado else None}
 
+@app.get("/usuarios/me", operation_id="obtener_usu")
+async def obtener_usu(token: str = Depends(esquemaa_oauth2)):
+        try:
+            carga_util = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
+            username = carga_util.get("sub")
+
+            if username is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="No se pudieron validar las credenciales",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+
+            usuario = obtener_usuario_por_identificador(username)
+            if usuario is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Usuario no encontrado",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+
+            return usuario
+
+        except JWTError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No se pudieron validar las credenciales",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        except jwt.exceptions.DecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Error decodificando token: {}".format(str(e)),
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
+#verificar la firma de la clave secreta
+def check_jwt_token(token):
+    try:
+        token = str(token)
+        print(token)
+        # Replace 'SECRET_KEY' with the appropriate secret key
+        decoded_token = jwt.decode(token, CLAVE_SECRETA)
+        return decoded_token
+    except jwt.DecodeError:
+        return None
+
+
+
+"""
+@app.post("/Iniciar_Sesion")
+
+"""  
 
 @app.post("/Sesión_Anónima")
 async def obtener_token_para_anonimos(request: Request):
-    # No se requieren credenciales, usar el tipo de usuario anónimo
     tipo_usuario = TipoUsuario.Anonimo
-    datos_token = {"sub": tipo_usuario}
+    datos_token = {"sub": tipo_usuario.value}
 
-    # Generar el nombre y el username del usuario anónimo
     nombre_usuario_anonimo = generar_nombre()
     username_usuario_anonimo = generar_username()
+    id_user_name_anonimo = generar_uuid(username_usuario_anonimo)
 
-    # Generar y devolver el token de acceso
+    datos_token.update({
+        "nombre_usuario": nombre_usuario_anonimo,
+        "user_name": username_usuario_anonimo,
+        "id_user_name": id_user_name_anonimo
+    })
+
     duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
     token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
 
-    # Almacena el tipo de usuario en el estado de la solicitud
     request.state.tipo_usuario = tipo_usuario
 
     return {
         "token_acceso": token_acceso,
         "tipo_token": "bearer",
         "tipo_usuario": tipo_usuario.value,
-        "tipo_usuario": nombre_usuario_anonimo,
-        "tipo_usuario": username_usuario_anonimo,
+        "nombre_usuario": nombre_usuario_anonimo,
+        "user_name": username_usuario_anonimo,
+        "id_user_name": id_user_name_anonimo,
         "mensaje": f"Bienvenido, {tipo_usuario.value}!"
     }
 
 
-@app.post("/Iniciar_Sesión")
-async def manejar_sesion(token_acceso: Optional[str] = Depends(verificar_usuarios_registrados)):
-    nombre_usuario = token_acceso.get("nombre_usuario")
+async def cerrar_sesion(request: Request = None):
+    # incluir eliminar el token de una lista negra o invalidar el token en la base de datos.
+    # Dependiendo de cómo se maneje los tokens, esta lógica variará.
+    # excepción 401 Unauthorized.
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Sesión cerrada exitosamente",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
-    if nombre_usuario:
-        # El usuario es registrado, realizar las acciones necesarias
-        return {"token_acceso": token_acceso, "mensaje": f"Bienvenido, {nombre_usuario}!"}
-    else:
-        # Manejar el caso cuando no hay un nombre de usuario (por ejemplo, usuario anónimo)
-        return {"token_acceso": token_acceso, "mensaje": "Bienvenido"}
+
+@app.post("/Cerrar_Sesion")
+async def manejar_cerrar_sesion():
+    await cerrar_sesion()
 
 
 @app.get("/Chat")
 async def chat(
     request: Request,
     mensaje: str,
-    tipo_usuario: TipoUsuario = TipoUsuario.Anonimo,  # Establecer "Anónimo" como opción predeterminada,
-    username: str = None,
-    nombre: str = None,
     ip: Optional[str] = None,
-    user_agent: Optional[str] = None
+    user_agent: Optional[str] = None,
+    usuario: DatosU = Depends(obtener_usu)
 ):
-    """
-    Inicia una conversación.
-    """
-    # Verificar si el usuario es "Registrado"
-    if tipo_usuario == TipoUsuario.Registrado:
-        if not (username and nombre):
-            raise HTTPException(status_code=400, detail="El username y el nombre son obligatorios para usuarios registrados.")
     
-    # Construir la conversación
-    conversacion = await construir_conversacion(request, mensaje, tipo_usuario, username, nombre, ip, user_agent)
-    
-    # Obtener el usuario_id de la conversación
-    usuario_id = conversacion["usuario_id"]
-    
-    # Obtener el tipo de usuario del contexto de la solicitud
     tipo_usuario = request.state.tipo_usuario
-    
-    # Guardar la conversación en la base de datos
+    if tipo_usuario == TipoUsuario.Registrado:
+        if not (usuario.user_name and usuario.nombre_usuario and usuario.id_user_name):
+            raise HTTPException(status_code=400, detail="El username, el nombre y el id_user_name son obligatorios para usuarios registrados.")
+        username = usuario.user_name
+        nombre = usuario.nombre_usuario
+        id_user_name = usuario.id_user_name
+    else:
+        username = usuario.user_name
+        nombre = usuario.nombre_usuario
+        id_user_name = usuario.id_user_name
+
+    conversacion = await construir_conversacion(request, mensaje, tipo_usuario, username, nombre, ip, user_agent)
+    usuario_id = conversacion["usuario_id"]
     await guardar_conversacion(conversacion)
-    
-    # Enviamos la solicitud al chatbot
     productor.send('input_topic', key=usuario_id, value={"conversación": conversacion})
-    
+
     return {"conversación": conversacion}
 
-
-#Endpoint para recibir la respuesta del chatbot
 @app.post("/Respuesta_chat/{usuario_id}")
-async def obtener_respuesta_chat(usuario_id: str):
-    
+async def obtener_respuesta_chat(
+    usuario_id: str,
+    usuario: DatosU = Depends(obtener_usu)
+):
     particion = custom_particionador.particion({"usuario_id": usuario_id})
-    
-    # Obtener los datos del usuario de la base de datos MongoDB
+
     datos_usuario = await conversaciones_coleccion.find_one(
         {"usuario_id": usuario_id},
         sort=[("timestamp", -1)],
         limit=1
     )
-    
+
     if datos_usuario is None:
         raise HTTPException(status_code=404, detail="Token de conversación no válido")
 
     mensaje = datos_usuario.get("mensaje")
     usernameR = datos_usuario.get("username_usuario")
-
     intento = predecir_clase(mensaje)
     respuesta = obtener_respuesta(intento, intentos)
-    
+
     if "conversacion" not in datos_usuario:
         datos_usuario["conversacion"] = []
 
@@ -1000,7 +1177,7 @@ async def obtener_respuesta_chat(usuario_id: str):
             "particion": particion
         }
 
-        # Guardar la particion en la base de datos
+        # Guardar la partición en la base de datos
         await guardar_unico_documento(particion_usuario)
 
     conversacion_usuario = {
@@ -1022,31 +1199,31 @@ async def obtener_respuesta_chat(usuario_id: str):
         "respuesta": respuesta,
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    
+
     completo = {
         "Usuario": [conversacion_usuario],
         "Chatbot": [respuesta_chatbot]
     }
-    
+
     productor.send('output_topic', key=usuario_id, value={"respuesta": respuesta_chatbot})
-    
+
     await aumentar_particiones_si_es_necesario("historial_topic", particiones_coleccion)
-    
-    # Antes de enviar el mensaje a Kafka, calcular la partición a la que se asignará la clave
+
     print(f"Clave: {usuario_id}, Partición: {particion}")
-    
-    # Guardar la respuesta en la base de datos
+
     await guardar_respuestas(respuesta_chatbot)
-    
-    # Luego, enviar el historial a Kafka
+
     historial_productor.send('historial_topic', key=usuario_id, value=completo, partition=particion)
-    
+
     return {"Respuesta": respuesta_chatbot}
 
 
 #Endpoint para obtener el historial de cierto usuario por su "usuario_id"
 @app.get("/Obtener_historial/{usuario_id}")
-async def obtener_historial(usuario_id: str):
+async def obtener_historial(
+    usuario_id: str,
+    usuario: DatosUsuario = Depends(obtener_usu) # Cambia la dependencia a obtener_usuario_actual
+):
     try:
         # Obtener la partición asignada al usuario
         particion = obtener_particion_usuario(usuario_id, historial_consumidor, historial_topic)
