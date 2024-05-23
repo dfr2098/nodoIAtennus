@@ -18,6 +18,7 @@ class DatosU(BaseModel):
     correo_electronico: str
     user_name: str
     id_user_name: str
+    tipo_usuario: str
     
 # Configuración los parámetros de conexión de MySQL
 config = {
@@ -72,9 +73,14 @@ def obtener_hash_contrasena(contrasena):
 esquema_oauth2 = OAuth2PasswordBearer(tokenUrl="/Token")
 
 # Función para obtener el token de acceso
-def obtener_token_acceso(nombre_usuario: str):
+def obtener_token_acceso(usuario: dict): # Cambiamos el argumento a 'usuario'
     fecha_expiracion = datetime.now(timezone.utc) + timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
-    token_acceso = jwt.encode({"sub": nombre_usuario, "exp": fecha_expiracion}, CLAVE_SECRETA, algorithm=ALGORITMO)
+    # Incluimos 'tipo_usuario' en el payload:
+    token_acceso = jwt.encode({
+        "sub": usuario['user_name'], 
+        "exp": fecha_expiracion,
+        "tipo_usuario": usuario['tipo_usuario'].value  # Obtener el valor de la enumeración
+    }, CLAVE_SECRETA, algorithm=ALGORITMO)
     return token_acceso
 
 # Función para manejar la autenticación y obtener el token
@@ -170,13 +176,13 @@ def obtener_usuario_por_identificador(identificador: str) -> Optional[DatosU]:
     cursor = conexion.cursor(dictionary=True)
 
     # Primero intenta buscar por user_name
-    query = "SELECT nombre_usuario, correo_electronico, user_name, id_user_name FROM usuarios WHERE user_name = %s"
+    query = "SELECT nombre_usuario, correo_electronico, user_name, id_user_name, tipo_usuario FROM usuarios WHERE user_name = %s"
     cursor.execute(query, (identificador,))
     resultado = cursor.fetchone()
 
     # Si no encuentra, intenta buscar por correo_electronico
     if not resultado:
-        query = "SELECT nombre_usuario, correo_electronico, user_name, id_user_name FROM usuarios WHERE correo_electronico = %s"
+        query = "SELECT nombre_usuario, correo_electronico, user_name, id_user_name, tipo_usuario FROM usuarios WHERE correo_electronico = %s"
         cursor.execute(query, (identificador,))
         resultado = cursor.fetchone()
 
@@ -189,7 +195,8 @@ def obtener_usuario_por_identificador(identificador: str) -> Optional[DatosU]:
                 nombre_usuario=resultado.get('nombre_usuario'),
                 correo_electronico=resultado.get('correo_electronico'),
                 user_name=resultado.get('user_name'),
-                id_user_name=resultado.get('id_user_name') 
+                id_user_name=resultado.get('id_user_name'),
+                tipo_usuario=resultado.get('tipo_usuario')  
             )
         except ValidationError as e:
             print("Error de validación:", e)
@@ -200,7 +207,7 @@ def obtener_usuario_por_identificador(identificador: str) -> Optional[DatosU]:
 class DatosToken(BaseModel):
     nombre_usuario: str | None = None
 
-class Tokeen(BaseModel):
+class Token(BaseModel):
     token_acceso: str
     tipo_token: str
     nombre_usuario: Optional[str] = None
