@@ -20,7 +20,7 @@ from bson import ObjectId
 from pymongo import MongoClient
 import motor.motor_asyncio
 from pymongo.errors import PyMongoError
-from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter, Form, Response, Header
+from fastapi import FastAPI, Depends, HTTPException, status, Request, APIRouter, Form, Cookie, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from Autentificacion import (
     autenticar_usuario,
@@ -36,12 +36,13 @@ from email_validator import validate_email, EmailNotValidError
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 import re
-from typing import Annotated, Union
+from typing import Annotated, Union, AsyncGenerator
 import requests
 import jwt 
+from jwt import PyJWTError
 from jose import JWTError
-import logging
-
+from functools import lru_cache
+import pickle
 
 # Conexión a la base de datos de MongoDB asincrónica
 client = motor.motor_asyncio.AsyncIOMotorClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')
@@ -49,6 +50,7 @@ db = client["tennus_data_analitica"]
 conversaciones_coleccion = db["Mensajes"]
 respuestas_coleccion = db["Respuestas"]
 particiones_coleccion = db["Particiones"]
+cache_coleccion =  db["Cache"]
 
 #Configuración del entorno y de las variables
 #Iniciar FastAPI
@@ -340,119 +342,10 @@ async def determinar_tipo_usuario(request: Request, call_next):
 
     # Si el tipo de usuario es anónimo y se activó el indicador de ejecución, ejecuta la función de eliminación
     if request.state.tipo_usuario == TipoUsuario.Anonimo and ejecutar_eliminar_particion:
-        eliminar_particion_y_historial(usuario_id="usuario_id", historial_consumidor="historial", nombre_topic="nombre_topic", admin_cliente="admin_cliente")
+        await eliminar_particion_y_historial(usuario_id="usuario_id", historial_consumidor="historial", nombre_topic="nombre_topic", admin_cliente="admin_cliente")
 
     return response
 
-"""
-# Endpoint que administra los tokens de autentificación
-@app.post("/Token", response_model=Token)
-async def iniciar_sesion_para_obtener_token_acceso(form_data: OAuth2PasswordRequestForm = Depends()):
-    usuario = autenticar_usuario(obtener_conexion_db(), form_data.nombre_usuario, form_data.contrasena)
-    if not usuario:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="contraseña o nombre de usuario erroneós",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
-    token_acceso = crear_token_acceso(
-        datos={"sub": usuario.nombre_usuario}, duracion_delta=duracion_token_acceso
-    )
-    return {"token_acceso": token_acceso, "tipo_token": "bearer"}
-"""
-
-"""
-@app.post("/Token", response_model=Token)
-async def obtener_token_acceso(usuario: str = Form(None), contrasena: str = Form(None)):
-    if usuario and contrasena:
-        # Se proporcionaron credenciales de usuario, verificarlas
-        usuario_valido = autenticar_usuario(obtener_conexion_db(), usuario, contrasena)
-        if not usuario_valido:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Usuario o contraseña incorrectos",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        # Si las credenciales son válidas, generar un token de acceso
-        datos_token = {"sub": usuario}
-    else:
-        # No se proporcionaron credenciales, usar el tipo de usuario anónimo
-        tipo_usuario_anonimo = TipoUsuario.Anonimo
-        datos_token = {"sub": tipo_usuario_anonimo}
-
-    # Generar y devolver el token de acceso
-    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
-    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
-    
-    return {"token_acceso": token_acceso, "tipo_token": "bearer"}
-
-
-#endpoint para manejar sesiones
-@app.post("/Sesión")
-async def manejar_sesion(request: Request, token: str = Depends(obtener_token)):
-    # Intenta obtener el usuario actual a partir del token recibido en el encabezado de autorización
-    try:
-        usuario_actual = obtener_usuario_actual(token)
-        tipo_usuario = TipoUsuario.Registrado
-    except:
-        # Si el token no es válido o no está presente, trata al usuario como anónimo
-        tipo_usuario = TipoUsuario.Anonimo
-
-    # Almacena el tipo de usuario en el estado de la solicitud
-    request.state.tipo_usuario = tipo_usuario
-
-    if tipo_usuario == TipoUsuario.Anonimo:
-        # Genera el nombre y el username del usuario anónimo
-        nombre_usuario = generar_nombre()
-        username_usuario = generar_username()
-
-        # Almacena la información del usuario anónimo en una variable de sesión
-        session_data = {"nombre_usuario": nombre_usuario, "username_usuario": username_usuario}
-
-        # Permite que el usuario anónimo use el chat
-        return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
-    elif tipo_usuario == TipoUsuario.Registrado:
-        # El usuario es registrado, realiza las acciones necesarias
-        return {"mensaje": f"Bienvenido, {tipo_usuario.value}!"}
-
-
-class RegistroUsuario(BaseModel):
-    nombre_usuario: str = Field(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
-    contrasena: str = Field(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 20 caracteres"),
-    confirmar_contrasena: str = Field(..., min_length=5, max_length=15, description="Repetir contraseña"),
-    email: EmailStr = Field(..., description="Ingresa un correo"),
-    user_name: str = Field(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),  # Incluir user_name como un campo de formulario con restricciones de longitud y sin espacios en blanco),
-    
-    @model_validator(mode='after')
-    def no_espacios_en_nombre_de_usuario(valor: str) -> str:
-        if not re.match(r'^\S+$', valor):
-            raise ValueError('El nombre de usuario no puede contener espacios en blanco')
-        return valor
-
-    @model_validator(mode='after')
-    def contrasenas_coinciden(contrasena: str, confirmar_contrasena: str) -> None:
-        if contrasena != confirmar_contrasena:
-            raise ValueError('Las contraseñas no coinciden')
-    
-    @model_validator(mode='after')
-    def validar_longitud_nombre(nombre_usuario: str) -> None:
-        if len(nombre_usuario) < 5:
-            raise ValueError('El nombre de usuario debe tener al menos 5 caracteres')
-        
-    @model_validator(mode='after')
-    def validar_longitud_username(user_name: str) -> None:
-        if len(user_name) < 5:
-            raise ValueError('El username debe tener al menos 5 caracteres')
-    
-    @model_validator(mode='after')
-    def correo_correcto(valor: EmailStr) -> EmailStr:
-        try:
-            validate_email(valor)
-        except EmailNotValidError as e:
-            raise ValueError('El correo proporcionado no es correcto')
-        return valor
-"""
      
 class UsuarioCreado(BaseModel):
     nombre_usuario: str
@@ -576,10 +469,10 @@ async def crear_usuario(
     ip_usuario = request.client.host if request.client.host else None
 
     # Verifica si el usuario ya existe en la base de datos
-    conexion_db = obtener_conexion_db()
-    cursor = conexion_db.cursor()
-    cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
-    username_existente = cursor.fetchone()
+    conexion_db = await obtener_conexion_db()
+    cursor = await conexion_db.cursor()
+    await cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
+    username_existente = await cursor.fetchone()
     cursor.close()
 
     if username_existente:
@@ -589,10 +482,10 @@ async def crear_usuario(
         )
 
     # Verifica si el correo electrónico ya existe en la base de datos
-    conexion_db = obtener_conexion_db()
-    cursor = conexion_db.cursor()
-    cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (email,))
-    email_existente = cursor.fetchone()
+    conexion_db = await obtener_conexion_db()
+    cursor = await conexion_db.cursor()
+    await cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (email,))
+    email_existente = await cursor.fetchone()
     cursor.close()
 
     if email_existente:
@@ -602,19 +495,19 @@ async def crear_usuario(
         )
 
     # Crea un hash de la contraseña
-    contrasena_cifrada = obtener_hash_contrasena(contrasena)
+    contrasena_cifrada = await obtener_hash_contrasena(contrasena)
 
     # Genera un UUID para el campo id_user_name
     id_user_name = generar_uuid(user_name)
 
     # Almacena el usuario en la base de datos con tipo_usuario como "Registrado"
-    conexion_db = obtener_conexion_db()
-    cursor = conexion_db.cursor()
-    cursor.execute(
+    conexion_db = await obtener_conexion_db()
+    cursor = await conexion_db.cursor()
+    await cursor.execute(
         "INSERT INTO usuarios (user_name, nombre_usuario, contrasena, correo_electronico, id_user_name, tipo_usuario, ip_usuario) VALUES (%s, %s, %s, %s, %s, %s, %s)",
         (user_name, nombre_usuario, contrasena_cifrada, email, id_user_name, TipoUsuario.Registrado.value, ip_usuario),
     )
-    conexion_db.commit()
+    await conexion_db.commit()
     cursor.close()
 
     # Genera un token de acceso para el usuario recién creado
@@ -622,7 +515,7 @@ async def crear_usuario(
     datos_token = {"sub": user_name}
     # Devolver el nombre del usuario junto con el tipo de usuario
     datos_token.update({"nombre_usuario": nombre_usuario, "tipo_usuario": "Registrado"})
-    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+    token_acceso = await crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
 
     # Devuelve el usuario creado, el id_user_name y el token de acceso
     datos_usuario = DatosUsuario(
@@ -647,13 +540,13 @@ esquemaa_oauth2 = OAuth2PasswordBearer(tokenUrl="/Iniciar_Sesion")
 
 
 @app.post("/Iniciar_Sesion", response_model=Token)
-def obtener_token_acceso(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None) -> Token:
+async def obtener_token_acceso(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None) -> Token:
     nombre_usuario_o_correo = form_data.username  # Extraer el nombre de usuario o correo del form_data
     contrasena = form_data.password  # Extraer la contraseña del form_data
 
     if nombre_usuario_o_correo is not None and contrasena is not None:
         # Se proporcionaron credenciales de usuario, verificarlas
-        usuario_valido = autenticar_usuario(obtener_conexion_db(), nombre_usuario_o_correo, contrasena)
+        usuario_valido = await autenticar_usuario( await obtener_conexion_db(), nombre_usuario_o_correo, contrasena)
         if not usuario_valido:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -690,7 +583,7 @@ def obtener_token_acceso(form_data: OAuth2PasswordRequestForm = Depends(), reque
 
     # Generar y devolver el token de acceso
     duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
-    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+    token_acceso = await crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
 
     # Almacena el tipo de usuario en el estado de la solicitud
     request.state.tipo_usuario = tipo_usuario
@@ -702,8 +595,6 @@ def obtener_token_acceso(form_data: OAuth2PasswordRequestForm = Depends(), reque
         tipo_usuario= TipoUsuario.Registrado,
         id_user_name = id_user_name
     )
-
-
 
 
 @app.get("/usuarios/me", operation_id="obtener_usu")
@@ -719,7 +610,7 @@ async def obtener_usu(token: str = Depends(esquemaa_oauth2)):
                     headers={"WWW-Authenticate": "Bearer"}
                 )
 
-            usuario = obtener_usuario_por_identificador(username)
+            usuario = await obtener_usuario_por_identificador(username)
             if usuario is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -766,7 +657,7 @@ async def obtener_token_para_anonimos(request: Request) -> TokenAnonimo:
     })
 
     duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
-    token_acceso = crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+    token_acceso = await crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
 
     request.state.tipo_usuario = tipo_usuario
 
@@ -780,20 +671,6 @@ async def obtener_token_para_anonimos(request: Request) -> TokenAnonimo:
         mensaje= f"Bienvenido, {tipo_usuario.value}!"
     )
 
-async def cerrar_sesion(request: Request = None):
-    # incluir eliminar el token de una lista negra o invalidar el token en la base de datos.
-    # Dependiendo de cómo se maneje los tokens, esta lógica variará.
-    # excepción 401 Unauthorized.
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Sesión cerrada exitosamente",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
-@app.post("/Cerrar_Sesion")
-async def manejar_cerrar_sesion():
-    await cerrar_sesion()
 
 """
 @app.get("/Chat")
@@ -825,6 +702,7 @@ async def chat(
     return {"conversación": conversacion}
 """
 
+"""Funciona
 async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
     try:
         payload = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
@@ -834,7 +712,7 @@ async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
 
         if tipo_usuario == TipoUsuario.Registrado:
             nombre_usuario = payload.get("sub")
-            usuario_registrado = obtener_usuario_por_identificador(nombre_usuario)
+            usuario_registrado = await obtener_usuario_por_identificador(nombre_usuario)
             if usuario_registrado:
                 # Acceder a los atributos con notación de punto:
                 yield DatosU(nombre_usuario=usuario_registrado.nombre_usuario,
@@ -869,7 +747,157 @@ async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
 
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido")
+"""
 
+# Tamaño máximo de la caché local (puedes ajustarlo según tus necesidades)
+MAX_LOCAL_CACHE_SIZE = 1024
+
+@lru_cache(maxsize=MAX_LOCAL_CACHE_SIZE)
+async def get_cache(token: str) -> dict:
+    """
+    Función para obtener la caché de MongoDB basada en el token del usuario.
+    """
+    # Buscar en la base de datos MongoDB la caché asociada al token
+    cache_data = await cache_coleccion.find_one({"token": token})
+    if cache_data:
+        return cache_data
+    else:
+        return {}
+
+
+# Función principal para obtener usuario o token
+async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
+    try:
+        # Verificar si los datos del token están en la caché
+        cache_data = await get_cache(token)
+
+        # Si los datos del token están en la caché, devolvemos los datos de la caché
+        if cache_data:
+            if cache_data.get("tipo_usuario") == TipoUsuario.Registrado:
+                yield DatosU(**cache_data.get("usuario_registrado"))
+            elif cache_data.get("tipo_usuario") == TipoUsuario.Anonimo:
+                yield TokenAnonimo(**cache_data)
+        else:
+            # Si los datos del token no están en la caché, procedemos a decodificar el token
+            payload = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
+            tipo_usuario_valor = payload.get("tipo_usuario")
+            tipo_usuario = TipoUsuario(tipo_usuario_valor) if tipo_usuario_valor else None
+
+            # Si el tipo de usuario es Registrado
+            if tipo_usuario == TipoUsuario.Registrado:
+                nombre_usuario = payload.get("sub")
+                usuario_registrado = await obtener_usuario_por_identificador(nombre_usuario)
+                if usuario_registrado:
+                    # Acceder a los atributos con notación de punto:
+                    yield DatosU(
+                        nombre_usuario=usuario_registrado.nombre_usuario,
+                        correo_electronico=usuario_registrado.correo_electronico,
+                        user_name=usuario_registrado.user_name,
+                        id_user_name=usuario_registrado.id_user_name,
+                        tipo_usuario=usuario_registrado.tipo_usuario
+                    )
+                    # Actualizar la caché con los datos del usuario registrado
+                    cache_coleccion.update_one({"token": token}, {"$set": {"tipo_usuario": TipoUsuario.Registrado, "usuario_registrado": usuario_registrado.dict()}})
+                else:
+                    raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+            # Si el tipo de usuario es Anonimo
+            elif tipo_usuario == TipoUsuario.Anonimo:
+                nombre_usuario = payload.get("nombre_usuario")
+                user_name = payload.get("user_name")
+                id_user_name = payload.get("id_user_name")
+                yield TokenAnonimo(
+                    access_token=token,
+                    token_type="bearer",
+                    tipo_usuario="Anonimo",
+                    nombre_usuario=nombre_usuario,
+                    user_name=user_name,
+                    id_user_name=id_user_name,
+                    mensaje="Bienvenido, usuario anónimo!"
+                )
+                # Actualizar la caché con los datos del usuario anónimo
+                cache_coleccion.update_one({"token": token}, {"$set": {"tipo_usuario": TipoUsuario.Anonimo, "nombre_usuario": nombre_usuario, "user_name": user_name, "id_user_name": id_user_name}})
+            else:
+                raise HTTPException(status_code=400, detail="Tipo de usuario desconocido en el token.")
+
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+
+
+"""
+async def cerrar_sesion(request: Request = None):
+    # incluir eliminar el token de una lista negra o invalidar el token en la base de datos.
+    # Dependiendo de cómo se maneje los tokens, esta lógica variará.
+    # excepción 401 Unauthorized.
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Sesión cerrada exitosamente",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+@app.post("/Cerrar_Sesion")
+async def manejar_cerrar_sesion():
+    await cerrar_sesion()
+"""
+
+
+async def eliminar_cache():
+    """
+    Elimina todos los documentos de la colección de caché en MongoDB.
+    """
+    await cache_coleccion.delete_many({})
+
+
+async def eliminar_cache_usuario(token: str):
+    """
+    Elimina el documento de la colección de caché en MongoDB correspondiente al token proporcionado.
+    """
+    await cache_coleccion.delete_one({'token': token})
+
+
+async def cerrar_sesion(token: str = Depends(esquemaa_oauth2)):
+    try:
+        # Obtener el usuario o los datos del token
+        usuario_o_token_generator = await obtener_usuario_o_token(token)
+        try:
+            usuario_o_token = await usuario_o_token_generator.__anext__()
+        except StopIteration:
+            raise HTTPException(status_code=400, detail="Error al obtener el usuario o los datos del token.")
+
+        # Verificar si el usuario es anónimo o registrado
+        if isinstance(usuario_o_token, TokenAnonimo):
+            # Eliminar la partición y el historial del usuario anónimo
+            usuario_id = usuario_o_token.id_user_name
+            # Invalidar el token anónimo
+            await eliminar_cache_usuario(token)
+            
+            await eliminar_particion_y_historial(usuario_id, historial_consumidor, historial_topic, admin_cliente)
+
+        elif isinstance(usuario_o_token, DatosU):
+            # Invalidar el token de usuario registrado
+            await eliminar_cache_usuario(token)
+
+        else:
+            raise HTTPException(status_code=400, detail="Tipo de usuario desconocido en el token.")
+
+        # Opcionalmente, realizar otras acciones de cierre de sesión
+        # como eliminar cookies, limpiar caché, etc.
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión cerrada exitosamente",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    except PyJWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+
+@app.post("/Cerrar_Sesion")
+async def manejar_cerrar_sesion(token: str = Depends(esquemaa_oauth2)):
+    await cerrar_sesion(token=token)
 
 
 @app.get("/Chat")
@@ -920,6 +948,7 @@ async def chat(
     productor.send('input_topic', key=usuario_id, value={"conversación": conversacion})
 
     return {"conversación": conversacion}
+
 
 
 @app.post("/Respuesta_chat")
@@ -1076,7 +1105,7 @@ async def obtener_historial(current_user: Union[DatosU, TokenAnonimo] = Depends(
         raise HTTPException(status_code=500, detail=str(e))
 
 #Función que elimina la partición y el historial de los usuarios tipo anonimo 
-def eliminar_particion_y_historial(usuario_id: str, historial_consumidor, nombre_topic: str, admin_cliente):
+async def eliminar_particion_y_historial(usuario_id: str, historial_consumidor, nombre_topic: str, admin_cliente):
     try:
         # Obtener la partición del usuario
         particion_a_eliminar = obtener_particion_usuario(usuario_id, historial_consumidor, nombre_topic)
