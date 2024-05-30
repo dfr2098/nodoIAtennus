@@ -28,7 +28,7 @@ from Autentificacion import (
     obtener_conexion_db,
     DURACION_TOKEN_ACCESO_EN_MINUTOS,
     obtener_hash_contrasena,
-    CLAVE_SECRETA, ALGORITMO, obtener_usuario_por_identificador
+    CLAVE_SECRETA, ALGORITMO, obtener_usuario_por_identificador, usuario_existe, verificar_contrasena_actual
 )
 from datetime import timedelta
 from pydantic import BaseModel, EmailStr, Field, field_validator, ValidationError, model_validator
@@ -42,7 +42,10 @@ import jwt
 from jwt import PyJWTError
 from jose import JWTError
 from functools import lru_cache
-import pickle
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
 
 # Conexión a la base de datos de MongoDB asincrónica
 client = motor.motor_asyncio.AsyncIOMotorClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')
@@ -439,6 +442,33 @@ class TokenAnonimo(BaseModel):
     id_user_name: str
     mensaje: str
 
+class VerificarUsuarioAnonimoMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Extraer el token del encabezado Authorization
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            # Crear el generador asíncrono para obtener el usuario o los datos del token
+            usuario_o_token_generator = obtener_usuario_o_token(token)
+            
+            # Iterar sobre el generador para obtener el usuario o token
+            usuario_o_token = None
+            async for item in usuario_o_token_generator:
+                usuario_o_token = item
+                break
+            
+            # Verificar si el usuario es anónimo
+            if isinstance(usuario_o_token, TokenAnonimo):
+                usuario_id = usuario_o_token.id_user_name
+                # Eliminar la partición y el historial del usuario anónimo
+                await eliminar_particion_y_historial(usuario_id, historial_consumidor, historial_topic, admin_cliente)
+        
+        response = await call_next(request)
+        return response
+
+# Añadir el middleware a la aplicación FastAPI
+app.add_middleware(VerificarUsuarioAnonimoMiddleware)
+
 @app.post("/Registro")
 async def crear_usuario(
     request: Request,
@@ -473,7 +503,7 @@ async def crear_usuario(
     cursor = await conexion_db.cursor()
     await cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
     username_existente = await cursor.fetchone()
-    cursor.close()
+    await cursor.close()
 
     if username_existente:
         raise HTTPException(
@@ -486,7 +516,7 @@ async def crear_usuario(
     cursor = await conexion_db.cursor()
     await cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (email,))
     email_existente = await cursor.fetchone()
-    cursor.close()
+    await cursor.close()
 
     if email_existente:
         raise HTTPException(
@@ -508,7 +538,7 @@ async def crear_usuario(
         (user_name, nombre_usuario, contrasena_cifrada, email, id_user_name, TipoUsuario.Registrado.value, ip_usuario),
     )
     await conexion_db.commit()
-    cursor.close()
+    await cursor.close()
 
     # Genera un token de acceso para el usuario recién creado
     duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
@@ -672,6 +702,9 @@ async def obtener_token_para_anonimos(request: Request) -> TokenAnonimo:
     )
 
 
+
+
+
 """
 @app.get("/Chat")
 async def chat(
@@ -749,14 +782,14 @@ async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
         raise HTTPException(status_code=401, detail="Token inválido")
 """
 
+"""
 # Tamaño máximo de la caché local (puedes ajustarlo según tus necesidades)
 MAX_LOCAL_CACHE_SIZE = 1024
 
+#Función para obtener la caché de MongoDB basada en el token del usuario.
 @lru_cache(maxsize=MAX_LOCAL_CACHE_SIZE)
 async def get_cache(token: str) -> dict:
-    """
-    Función para obtener la caché de MongoDB basada en el token del usuario.
-    """
+
     # Buscar en la base de datos MongoDB la caché asociada al token
     cache_data = await cache_coleccion.find_one({"token": token})
     if cache_data:
@@ -796,8 +829,24 @@ async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
                         id_user_name=usuario_registrado.id_user_name,
                         tipo_usuario=usuario_registrado.tipo_usuario
                     )
+                    
+                    # Convertir la instancia de Pydantic a un diccionario
+                    usuario_registrado_dict = usuario_registrado.model_dump()
+                    
+                    print("dict_user_registrado")
+                    print(usuario_registrado_dict)
+
+                    # Imprimir la consulta update_one
+                    print("Consulta update_one:")
+                    print({"token": token}, {"$set": {"tipo_usuario": TipoUsuario.Registrado, "usuario_registrado": usuario_registrado_dict}})
+
                     # Actualizar la caché con los datos del usuario registrado
-                    cache_coleccion.update_one({"token": token}, {"$set": {"tipo_usuario": TipoUsuario.Registrado, "usuario_registrado": usuario_registrado.dict()}})
+                    try:
+                        await cache_coleccion.insert_one({"token": token}, {"$set": {"tipo_usuario": TipoUsuario.Registrado, "usuario_registrado": usuario_registrado_dict}})
+                    except Exception as e:
+                        print(f"Error al actualizar la caché: {e}")
+                
+                    print("Caché actualizada")
                 else:
                     raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
@@ -816,14 +865,121 @@ async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
                     mensaje="Bienvenido, usuario anónimo!"
                 )
                 # Actualizar la caché con los datos del usuario anónimo
-                cache_coleccion.update_one({"token": token}, {"$set": {"tipo_usuario": TipoUsuario.Anonimo, "nombre_usuario": nombre_usuario, "user_name": user_name, "id_user_name": id_user_name}})
+                await cache_coleccion.insert_one({"token": token}, {"$set": {"tipo_usuario": TipoUsuario.Anonimo, "nombre_usuario": nombre_usuario, "user_name": user_name, "id_user_name": id_user_name}})
             else:
                 raise HTTPException(status_code=400, detail="Tipo de usuario desconocido en el token.")
 
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido")
+"""
 
+# Tamaño máximo de la caché local (puedes ajustarlo según tus necesidades)
+MAX_LOCAL_CACHE_SIZE = 1024
+local_cache = {}
 
+async def get_cache(token: str) -> dict:
+    """
+    Función para obtener la caché de MongoDB basada en el token del usuario.
+    """
+    # Buscar en la base de datos MongoDB la caché asociada al token
+    cache_data = await cache_coleccion.find_one({"token": token})
+    if cache_data:
+        return cache_data
+    else:
+        return {}
+
+# Función para obtener usuario o token con caché manual
+async def obtener_usuario_o_token(token: str = Depends(esquemaa_oauth2)):
+    try:
+        # Verificar si los datos del token están en la caché local
+        if token in local_cache:
+            cache_data = local_cache[token]
+        else:
+            # Si no está en la caché local, obtener de MongoDB y actualizar la caché local
+            cache_data = await get_cache(token)
+            local_cache[token] = cache_data
+
+        # Si los datos del token están en la caché, devolvemos los datos de la caché
+        if cache_data:
+            if cache_data.get("tipo_usuario") == TipoUsuario.Registrado:
+                yield DatosU(**cache_data.get("usuario_registrado"))
+            elif cache_data.get("tipo_usuario") == TipoUsuario.Anonimo:
+                yield TokenAnonimo(**cache_data)
+        else:
+            # Si los datos del token no están en la caché, procedemos a decodificar el token
+            payload = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
+            tipo_usuario_valor = payload.get("tipo_usuario")
+            tipo_usuario = TipoUsuario(tipo_usuario_valor) if tipo_usuario_valor else None
+
+            # Si el tipo de usuario es Registrado
+            if tipo_usuario == TipoUsuario.Registrado:
+                nombre_usuario = payload.get("sub")
+                usuario_registrado = await obtener_usuario_por_identificador(nombre_usuario)
+                if usuario_registrado:
+                    yield DatosU(
+                        nombre_usuario=usuario_registrado.nombre_usuario,
+                        correo_electronico=usuario_registrado.correo_electronico,
+                        user_name=usuario_registrado.user_name,
+                        id_user_name=usuario_registrado.id_user_name,
+                        tipo_usuario=usuario_registrado.tipo_usuario
+                    )
+
+                    # Convertir la instancia de Pydantic a un diccionario
+                    usuario_registrado_dict = usuario_registrado.model_dump()
+
+                    # Actualizar la caché en MongoDB
+                    try:
+                        await cache_coleccion.update_one(
+                            {"token": token},
+                            {"$set": {"tipo_usuario": TipoUsuario.Registrado, "usuario_registrado": usuario_registrado_dict}},
+                            upsert=True
+                        )
+                    except Exception as e:
+                        print(f"Error al actualizar la caché: {e}")
+                else:
+                    raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+            # Si el tipo de usuario es Anonimo
+            elif tipo_usuario == TipoUsuario.Anonimo:
+                # Comprobar si ya existe un token anónimo para el mismo identificador de usuario anónimo
+                nombre_usuario = payload.get("nombre_usuario")
+                user_name = payload.get("user_name")
+                id_user_name = payload.get("id_user_name")
+                
+                # Buscar si existe ya un token con estos datos
+                existing_token = await cache_coleccion.find_one({
+                    "tipo_usuario": TipoUsuario.Anonimo,
+                    "nombre_usuario": nombre_usuario,
+                    "user_name": user_name,
+                    "id_user_name": id_user_name
+                })
+
+                if existing_token:
+                    yield TokenAnonimo(**existing_token)
+                else:
+                    # Si no existe, crear uno nuevo
+                    nuevo_token_anonimo = TokenAnonimo(
+                        access_token=token,
+                        token_type="bearer",
+                        tipo_usuario="Anonimo",
+                        nombre_usuario=nombre_usuario,
+                        user_name=user_name,
+                        id_user_name=id_user_name,
+                        mensaje="Bienvenido, usuario anónimo!"
+                    )
+                    yield nuevo_token_anonimo
+
+                    # Actualizar la caché en MongoDB con el nuevo token anónimo
+                    await cache_coleccion.update_one(
+                        {"token": token},
+                        {"$set": {"tipo_usuario": TipoUsuario.Anonimo, "nombre_usuario": nombre_usuario, "user_name": user_name, "id_user_name": id_user_name}},
+                        upsert=True
+                    )
+            else:
+                raise HTTPException(status_code=400, detail="Tipo de usuario desconocido en el token.")
+
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
 
 """
 async def cerrar_sesion(request: Request = None):
@@ -857,6 +1013,7 @@ async def eliminar_cache_usuario(token: str):
     await cache_coleccion.delete_one({'token': token})
 
 
+"""
 async def cerrar_sesion(token: str = Depends(esquemaa_oauth2)):
     try:
         # Obtener el usuario o los datos del token
@@ -893,11 +1050,140 @@ async def cerrar_sesion(token: str = Depends(esquemaa_oauth2)):
 
     except PyJWTError:
         raise HTTPException(status_code=401, detail="Token inválido")
+"""
 
+async def cerrar_sesion(request: Request, token: str = Depends(esquemaa_oauth2)):
+    try:
+        # Crear el generador asíncrono para obtener el usuario o los datos del token
+        usuario_o_token_generator = obtener_usuario_o_token(token)
+
+        # Iterar sobre el generador para obtener el usuario o token
+        usuario_o_token = None
+        async for item in usuario_o_token_generator:
+            usuario_o_token = item
+            break
+
+        if usuario_o_token is None:
+            raise HTTPException(status_code=400, detail="Error al obtener el usuario o los datos del token.")
+
+        # Verificar si el usuario es anónimo o registrado
+        if isinstance(usuario_o_token, TokenAnonimo):
+            # Eliminar la partición y el historial del usuario anónimo
+            usuario_id = usuario_o_token.id_user_name
+            # Invalidar el token anónimo
+            await eliminar_cache_usuario(token)
+            await eliminar_particion_y_historial(usuario_id, historial_consumidor, historial_topic, admin_cliente)
+
+        elif isinstance(usuario_o_token, DatosU):
+            # Invalidar el token de usuario registrado
+            await eliminar_cache_usuario(token)
+
+        else:
+            raise HTTPException(status_code=400, detail="Tipo de usuario desconocido en el token.")
+
+        # Devolver un mensaje de éxito en lugar de lanzar una excepción
+        response = JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"detail": "Sesión cerrada exitosamente"}
+        )
+
+        return response
+
+    except PyJWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
 
 @app.post("/Cerrar_Sesion")
-async def manejar_cerrar_sesion(token: str = Depends(esquemaa_oauth2)):
-    await cerrar_sesion(token=token)
+async def manejar_cerrar_sesion(request: Request, token: str = Depends(esquemaa_oauth2)):
+    return await cerrar_sesion(request=request, token=token)
+
+
+# Endpoint para editar una cuenta
+@app.put("/Editar_Cuenta/{id_usuario}")
+async def editar_cuenta(
+    request: Request,
+    id_usuario: str,
+    nombre_usuario: str = Form(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
+    contrasena: str = Form(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 15 caracteres"),
+    confirmar_contrasena: str = Form(..., min_length=5, max_length=15, description="Repetir contraseña"),
+    email: EmailStr = Form(..., description="Ingresa un correo"),
+    user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),
+    auth: DatosU = Depends(obtener_usuario_o_token)
+):
+    # Verificar si el usuario existe en la base de datos
+    if not await usuario_existe(user_name):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El usuario no existe",
+        )
+    try:
+        
+        ip_usuario = request.client.host if request.client.host else None
+
+        # Verifica si el usuario ya existe en la base de datos
+        conexion_db = await obtener_conexion_db()
+        cursor = await conexion_db.cursor()
+        await cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
+        username_existente = await cursor.fetchone()
+        cursor.close()
+
+        if username_existente:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="El nombre de usuario ya está en uso",
+            )
+
+        # Verifica si el correo electrónico ya existe en la base de datos
+        conexion_db = await obtener_conexion_db()
+        cursor = await conexion_db.cursor()
+        await cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (email,))
+        email_existente = await cursor.fetchone()
+        cursor.close()
+
+        if email_existente:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="El correo electrónico ya está en uso",
+            )
+        
+        if contrasena:
+            contrasena_cifrada = await obtener_hash_contrasena(contrasena)
+        else:
+            # Si no se proporciona una nueva contraseña, mantener la contraseña actual
+            # Implementar la lógica para obtener la contraseña actual de la base de datos
+            contrasena_actual = await verificar_contrasena_actual(user_name)
+
+        # Implementar la lógica para actualizar los datos del usuario en la base de datos
+
+        # Generar un nuevo token de acceso (si es necesario)
+        duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+        datos_token = {"sub": user_name}
+        datos_token.update({"nombre_usuario": nombre_usuario, "tipo_usuario": "Registrado"})
+        token_acceso = await crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+        # Devolver la respuesta con los datos actualizados del usuario y el token de acceso
+        datos_usuario = DatosUsuario(
+            nombre_usuario=nombre_usuario,
+            contrasena="****",  # Proporciona un valor de marcador de posición para el campo de contraseña
+            email=email,
+            user_name=user_name,
+            id_user_name=id_usuario,  # Actualizar con el ID correcto del usuario
+            ip_usuario=ip_usuario
+        )
+
+        return {
+            "usuario": datos_usuario,
+            "id_user_name": id_usuario,  # Actualizar con el ID correcto del usuario
+            "access_token": token_acceso,
+            "type_token": "bearer",
+            "tipo_usuario": TipoUsuario.Registrado
+        }
+
+    except Exception as e:
+        # Manejar cualquier error y devolver una respuesta adecuada
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ocurrió un error al editar la cuenta"
+        )
 
 
 @app.get("/Chat")
