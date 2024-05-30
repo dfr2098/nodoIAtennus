@@ -28,7 +28,8 @@ from Autentificacion import (
     obtener_conexion_db,
     DURACION_TOKEN_ACCESO_EN_MINUTOS,
     obtener_hash_contrasena,
-    CLAVE_SECRETA, ALGORITMO, obtener_usuario_por_identificador, usuario_existe, verificar_contrasena_actual
+    CLAVE_SECRETA, ALGORITMO, obtener_usuario_por_identificador, verificar_contrasena,
+    actualizar_datos_usuario, obtener_contrasena_usuario
 )
 from datetime import timedelta
 from pydantic import BaseModel, EmailStr, Field, field_validator, ValidationError, model_validator
@@ -1096,18 +1097,17 @@ async def cerrar_sesion(request: Request, token: str = Depends(esquemaa_oauth2))
 async def manejar_cerrar_sesion(request: Request, token: str = Depends(esquemaa_oauth2)):
     return await cerrar_sesion(request=request, token=token)
 
-
+"""
 # Endpoint para editar una cuenta
 @app.put("/Editar_Cuenta/{id_usuario}")
 async def editar_cuenta(
     request: Request,
-    id_usuario: str,
     nombre_usuario: str = Form(..., min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
     contrasena: str = Form(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 15 caracteres"),
     confirmar_contrasena: str = Form(..., min_length=5, max_length=15, description="Repetir contraseña"),
     email: EmailStr = Form(..., description="Ingresa un correo"),
     user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),
-    auth: DatosU = Depends(obtener_usuario_o_token)
+    usuario: DatosU = Depends(obtener_usuario_o_token)
 ):
     # Verificar si el usuario existe en la base de datos
     if not await usuario_existe(user_name):
@@ -1115,7 +1115,26 @@ async def editar_cuenta(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="El usuario no existe",
         )
+        
+    id_usuario = usuario.id_user_name
+    
     try:
+        
+        try:
+            RegistroUsuario(
+                nombre_usuario=nombre_usuario,
+                contrasena=contrasena,
+                confirmar_contrasena=confirmar_contrasena,
+                email=email,
+                user_name=user_name
+            )
+        except HTTPException as e:
+            raise e
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=e.errors()
+            )
         
         ip_usuario = request.client.host if request.client.host else None
 
@@ -1124,7 +1143,7 @@ async def editar_cuenta(
         cursor = await conexion_db.cursor()
         await cursor.execute("SELECT * FROM usuarios WHERE user_name = %s", (user_name,))
         username_existente = await cursor.fetchone()
-        cursor.close()
+        await cursor.close()
 
         if username_existente:
             raise HTTPException(
@@ -1137,7 +1156,7 @@ async def editar_cuenta(
         cursor = await conexion_db.cursor()
         await cursor.execute("SELECT * FROM usuarios WHERE correo_electronico = %s", (email,))
         email_existente = await cursor.fetchone()
-        cursor.close()
+        await cursor.close()
 
         if email_existente:
             raise HTTPException(
@@ -1148,11 +1167,10 @@ async def editar_cuenta(
         if contrasena:
             contrasena_cifrada = await obtener_hash_contrasena(contrasena)
         else:
-            # Si no se proporciona una nueva contraseña, mantener la contraseña actual
-            # Implementar la lógica para obtener la contraseña actual de la base de datos
             contrasena_actual = await verificar_contrasena_actual(user_name)
 
         # Implementar la lógica para actualizar los datos del usuario en la base de datos
+        await actualizar_datos_usuario(id_usuario, nombre_usuario, contrasena, email, user_name)
 
         # Generar un nuevo token de acceso (si es necesario)
         duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
@@ -1184,8 +1202,202 @@ async def editar_cuenta(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Ocurrió un error al editar la cuenta"
         )
+"""
 
+"""
+# Endpoint para editar una cuenta
+@app.put("/Editar_Cuenta/{id_usuario}")
+async def editar_cuenta(
+    request: Request,
+    nombre_usuario: Optional[str] = Form(None, min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
+    contrasena_actual: Optional[str] = Form(None, min_length=5, max_length=15, description="La contraseña actual"),
+    nueva_contrasena: Optional[str] = Form(None, min_length=5, max_length=15, description="La nueva contraseña"),
+    confirmar_contrasena: Optional[str] = Form(None, min_length=5, max_length=15, description="Repetir la nueva contraseña"),
+    email: Optional[EmailStr] = Form(None, description="Ingresa un correo"),
+    user_name: Optional[str] = Form(None, pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),
+    usuario: DatosU = Depends(obtener_usuario_o_token)
+):
+    # Verificar si el usuario es registrado
+    if usuario.tipo_usuario != TipoUsuario.Registrado:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado",
+        )
+        
+    id_usuario = usuario.id_user_name
+    # Verificar si el usuario existe en la base de datos
+    contrasena_hasheada = await obtener_contrasena_usuario(id_usuario)
 
+    # Verificar si la contraseña actual es correcta
+    if contrasena_actual and not await verificar_contrasena(contrasena_actual, contrasena_hasheada):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="La contraseña actual es incorrecta",
+        )
+
+    # Verificar si la nueva contraseña y la confirmación de la contraseña coinciden
+    if nueva_contrasena and confirmar_contrasena and nueva_contrasena != confirmar_contrasena:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La nueva contraseña y la confirmación de la contraseña no coinciden",
+        )
+
+    # Verificar si al menos uno de los parámetros es diferente de None
+    if all(v is None for v in [nombre_usuario, nueva_contrasena, email, user_name]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debe proporcionar al menos un parámetro para actualizar",
+        )
+
+    # Verificar si el user_name ya existe en la base de datos
+    if user_name:
+        # Obtener la conexión a la base de datos
+        conexion_db = await obtener_conexion_db()
+
+        try:
+            async with conexion_db.cursor() as cursor:
+                await cursor.execute("SELECT COUNT(*) FROM usuarios WHERE user_name = %s AND id_user_name != %s", (user_name, id_usuario))
+                count = await cursor.fetchone()
+                if count[0] > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="El nombre de usuario ya está en uso",
+                    )
+        finally:
+            # Cerrar la conexión a la base de datos
+            conexion_db.close()
+
+    # Verificar si el email ya existe en la base de datos
+    if email:
+        # Obtener la conexión a la base de datos
+        conexion_db = await obtener_conexion_db()
+
+        try:
+            async with conexion_db.cursor() as cursor:
+                await cursor.execute("SELECT COUNT(*) FROM usuarios WHERE correo_electronico = %s AND id_user_name != %s", (email, id_usuario))
+                count = await cursor.fetchone()
+                if count[0] > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="El correo electrónico ya está en uso",
+                    )
+        finally:
+            # Cerrar la conexión a la base de datos
+            conexion_db.close()
+           
+    # Actualizar los datos del usuario en la base de datos
+    await actualizar_datos_usuario(id_usuario, nombre_usuario, nueva_contrasena, email, user_name)
+
+    # Generar un nuevo token de acceso
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    datos_token = {"sub": user_name}
+    datos_token.update({"nombre_usuario": nombre_usuario, "tipo_usuario": "Registrado"})
+    token_acceso = await crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Devolver la respuesta con los datos actualizados del usuario y el token de acceso
+    return {
+        "access_token": token_acceso,
+        "type_token": "bearer",
+        "tipo_usuario": TipoUsuario.Registrado
+    }
+"""   
+
+# Endpoint para editar una cuenta
+@app.put("/Editar_Cuenta/{id_usuario}")
+async def editar_cuenta(
+    request: Request,
+    nombre_usuario: Optional[str] = Form(None, min_length=5, max_length=20, description="El nombre de usuario debe tener entre 5 y 20 caracteres"),
+    contrasena_actual: str = Form(..., min_length=5, max_length=15, description="La contraseña actual"),
+    nueva_contrasena: Optional[str] = Form(None, min_length=5, max_length=15, description="La nueva contraseña"),
+    confirmar_contrasena: Optional[str] = Form(None, min_length=5, max_length=15, description="Repetir la nueva contraseña"),
+    email: Optional[EmailStr] = Form(None, description="Ingresa un correo"),
+    user_name: Optional[str] = Form(None, pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),
+    usuario: DatosU = Depends(obtener_usuario_o_token)
+):
+    # Verificar si el usuario es registrado
+    if usuario.tipo_usuario != TipoUsuario.Registrado:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado",
+        )
+        
+    id_usuario = usuario.id_user_name
+    # Verificar si el usuario existe en la base de datos
+    contrasena_hasheada = await obtener_contrasena_usuario(id_usuario)
+
+    # Verificar si la contraseña actual es correcta
+    if contrasena_actual and not await verificar_contrasena(contrasena_actual, contrasena_hasheada):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="La contraseña actual es incorrecta",
+        )
+
+    # Verificar si la nueva contraseña y la confirmación de la contraseña coinciden
+    if nueva_contrasena and confirmar_contrasena and nueva_contrasena != confirmar_contrasena:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La nueva contraseña y la confirmación de la contraseña no coinciden",
+        )
+
+    # Verificar si al menos uno de los parámetros es diferente de None
+    if all(v is None for v in [nombre_usuario, nueva_contrasena, email, user_name]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debe proporcionar al menos un parámetro para actualizar",
+        )
+
+    # Verificar si el user_name ya existe en la base de datos
+    if user_name:
+        # Obtener la conexión a la base de datos
+        conexion_db = await obtener_conexion_db()
+
+        try:
+            async with conexion_db.cursor() as cursor:
+                await cursor.execute("SELECT COUNT(*) FROM usuarios WHERE user_name = %s AND id_user_name != %s", (user_name, id_usuario))
+                count = await cursor.fetchone()
+                if count[0] > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="El nombre de usuario ya está en uso",
+                    )
+        finally:
+            # Cerrar la conexión a la base de datos
+            conexion_db.close()
+
+    # Verificar si el email ya existe en la base de datos
+    if email:
+        # Obtener la conexión a la base de datos
+        conexion_db = await obtener_conexion_db()
+
+        try:
+            async with conexion_db.cursor() as cursor:
+                await cursor.execute("SELECT COUNT(*) FROM usuarios WHERE correo_electronico = %s AND id_user_name != %s", (email, id_usuario))
+                count = await cursor.fetchone()
+                if count[0] > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="El correo electrónico ya está en uso",
+                    )
+        finally:
+            # Cerrar la conexión a la base de datos
+            conexion_db.close()
+           
+    # Actualizar los datos del usuario en la base de datos
+    await actualizar_datos_usuario(id_usuario, contrasena_actual, nombre_usuario, nueva_contrasena, email, user_name)
+
+    # Generar un nuevo token de acceso
+    duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
+    datos_token = {"sub": user_name}
+    datos_token.update({"nombre_usuario": nombre_usuario, "tipo_usuario": "Registrado"})
+    token_acceso = await crear_token_acceso(datos=datos_token, duracion_delta=duracion_token_acceso)
+
+    # Devolver la respuesta con los datos actualizados del usuario y el token de acceso
+    return {
+        "access_token": token_acceso,
+        "type_token": "bearer",
+        "tipo_usuario": TipoUsuario.Registrado
+    }   
+    
 @app.get("/Chat")
 async def chat(
     request: Request,
