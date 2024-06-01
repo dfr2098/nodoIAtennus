@@ -21,6 +21,14 @@ class DatosU(BaseModel):
     id_user_name: str
     tipo_usuario: str
     
+class DatosToken(BaseModel):
+    nombre_usuario: str | None = None
+
+class Token(BaseModel):
+    token_acceso: str
+    tipo_token: str
+    nombre_usuario: Optional[str] = None
+
 # Configuración los parámetros de conexión de MySQL
 config = {
     'user': 'tennus01',
@@ -134,26 +142,6 @@ async def crear_token_acceso(datos: dict, duracion_delta: timedelta | None = Non
     token_codificado = jwt.encode(datos_para_codificar, CLAVE_SECRETA, algorithm=ALGORITMO)
     return token_codificado
 
-"""
-# Obtiener el usuario actual a partir de un token de acceso JWT
-def obtener_usuario_actual(token: str = Depends(esquema_oauth2)):
-    try:
-        carga_util = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
-        nombre_usuario: str = carga_util.get("sub")
-        if nombre_usuario is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No se pudo validar el token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return nombre_usuario
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido o expirado",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-"""
 
 # Obtiener el usuario actual a partir de un token de acceso JWT
 async def obtener_usuario_actual(token: str = Depends(esquema_oauth2)) -> DatosU:
@@ -192,44 +180,7 @@ async def obtener_usuario_actual(token: str = Depends(esquema_oauth2)) -> DatosU
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-"""
-# Función para obtener datos del usuario especifico desde la base de datos
-def obtener_usuario_por_identificador(identificador: str) -> Optional[DatosU]:
-    conexion = obtener_conexion_db()
-    if not conexion:
-        return None
 
-    cursor = conexion.cursor(dictionary=True)
-
-    # Primero intenta buscar por user_name
-    query = "SELECT nombre_usuario, correo_electronico, user_name, id_user_name, tipo_usuario FROM usuarios WHERE user_name = %s"
-    cursor.execute(query, (identificador,))
-    resultado = cursor.fetchone()
-
-    # Si no encuentra, intenta buscar por correo_electronico
-    if not resultado:
-        query = "SELECT nombre_usuario, correo_electronico, user_name, id_user_name, tipo_usuario FROM usuarios WHERE correo_electronico = %s"
-        cursor.execute(query, (identificador,))
-        resultado = cursor.fetchone()
-
-    cursor.close()
-    conexion.close()
-
-    if resultado:
-        try:
-            return DatosU(
-                nombre_usuario=resultado.get('nombre_usuario'),
-                correo_electronico=resultado.get('correo_electronico'),
-                user_name=resultado.get('user_name'),
-                id_user_name=resultado.get('id_user_name'),
-                tipo_usuario=resultado.get('tipo_usuario')  
-            )
-        except ValidationError as e:
-            print("Error de validación:", e)
-            return None
-    else:
-        return None
-"""
 
 async def obtener_usuario_por_identificador(identificador: str) -> Optional[DatosU]:
     conexion = await obtener_conexion_db()
@@ -263,67 +214,6 @@ async def obtener_usuario_por_identificador(identificador: str) -> Optional[Dato
     else:
         return None
 
-"""
-async def usuario_existe(user_name: str) -> bool:
-    async with aiomysql.create_pool(**config) as pool:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT COUNT(*) FROM usuarios WHERE user_name = %s", (user_name,))
-                count = await cursor.fetchone()
-                return count[0] > 0
-
-async def verificar_contrasena_actual(user_name: str, nueva_contrasena: str) -> None:
-    async with aiomysql.create_pool(**config) as pool:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT contrasena FROM usuarios WHERE user_name = %s", (user_name,))
-                result = await cursor.fetchone()
-                if result:
-                    contrasena_actual = result[0]
-                    if nueva_contrasena == contrasena_actual:
-                        raise ValueError("La nueva contraseña es igual a la contraseña actual.")
-                else:
-                    # Manejar el caso cuando el usuario no existe
-                    raise ValueError("El usuario no existe en la base de datos.")
-                
-async def actualizar_datos_usuario(
-    id_usuario: str,
-    nombre_usuario: str = None,
-    contrasena: str = None,
-    email: str = None,
-    user_name: str = None
-):
-    # Construir la consulta de actualización basada en los parámetros proporcionados
-    update_query = "UPDATE usuarios SET"
-    update_params = []
-    
-    if nombre_usuario is not None:
-        update_query += " nombre_usuario=%s,"
-        update_params.append(nombre_usuario)
-    
-    if contrasena is not None:
-        update_query += " contrasena=%s,"
-        update_params.append(contrasena)
-    
-    if email is not None:
-        update_query += " email=%s,"
-        update_params.append(email)
-    
-    if user_name is not None:
-        update_query += " user_name=%s,"
-        update_params.append(user_name)
-    
-    # Eliminar la coma adicional al final y agregar la condición WHERE
-    update_query = update_query.rstrip(",") + " WHERE id_usuario=%s"
-    update_params.append(id_usuario)
-
-    # Establecer la conexión a la base de datos y ejecutar la consulta de actualización
-    async with aiomysql.create_pool(**config) as pool:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(update_query, update_params)
-"""
-
 
 async def obtener_contrasena_usuario(id_user_name: str) -> str:
     async with aiomysql.create_pool(**config) as pool:
@@ -338,96 +228,6 @@ async def obtener_contrasena_usuario(id_user_name: str) -> str:
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail="El usuario no existe",
                     )
-"""
-async def actualizar_datos_usuario(
-    id_usuario: str,
-    nombre_usuario: Optional[str] = None,
-    contrasena: Optional[str] = None,
-    email: Optional[str] = None,
-    user_name: Optional[str] = None
-):
-    # Construir la consulta de actualización basada en los parámetros proporcionados
-    update_query = "UPDATE usuarios SET"
-    update_params = []
-
-    if nombre_usuario is not None:
-        update_query += " nombre_usuario=%s,"
-        update_params.append(nombre_usuario)
-
-    if contrasena is not None:
-        contrasena_cifrada = contexto_cifrado.hash(contrasena)
-        update_query += " contrasena=%s,"
-        update_params.append(contrasena_cifrada)
-
-    if email is not None:
-        update_query += " correo_electronico=%s,"
-        update_params.append(email)
-
-    if user_name is not None:
-        update_query += " user_name=%s,"
-        update_params.append(user_name)
-
-    # Eliminar la coma adicional al final y agregar la condición WHERE
-    update_query = update_query.rstrip(",") + " WHERE id_user_name=%s"
-    update_params.append(id_usuario)
-
-    # Establecer la conexión a la base de datos y ejecutar la consulta de actualización
-    async with aiomysql.create_pool(**config) as pool:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(update_query, update_params)
-"""
-
-
-"""SIRVE
-async def actualizar_datos_usuario(
-    id_usuario: str,
-    nombre_usuario: Optional[str] = None,
-    contrasena: Optional[str] = None,
-    email: Optional[str] = None,
-    user_name: Optional[str] = None
-):
-    # Construir la consulta de actualización basada en los parámetros proporcionados
-    update_query = "UPDATE usuarios SET"
-    update_params = []
-
-    if nombre_usuario is not None:
-        update_query += " nombre_usuario=%s,"
-        update_params.append(nombre_usuario)
-
-    if contrasena is not None:
-        contrasena_cifrada = contexto_cifrado.hash(contrasena)
-        update_query += " contrasena=%s,"
-        update_params.append(contrasena_cifrada)
-
-    if email is not None:
-        update_query += " correo_electronico=%s,"
-        update_params.append(email)
-
-    if user_name is not None:
-        update_query += " user_name=%s,"
-        update_params.append(user_name)
-
-    # Eliminar la coma adicional al final y agregar la condición WHERE
-    update_query = update_query.rstrip(",") + " WHERE id_user_name=%s"
-    update_params.append(id_usuario)
-
-    # Establecer la conexión a la base de datos y ejecutar la consulta de actualización
-    async with aiomysql.create_pool(**config) as pool:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                # Iniciar la transacción
-                await conn.begin()
-                try:
-                    # Ejecutar la consulta de actualización
-                    await cursor.execute(update_query, update_params)
-                    # Confirmar la transacción
-                    await conn.commit()
-                except Exception as e:
-                    # Si ocurre un error, revertir la transacción
-                    await conn.rollback()
-                    raise e
-"""
 
 async def actualizar_datos_usuario(
     id_usuario: str,
@@ -487,13 +287,3 @@ async def actualizar_datos_usuario(
                     # Si ocurre un error, revertir la transacción
                     await conn.rollback()
                     raise e
-
-
-class DatosToken(BaseModel):
-    nombre_usuario: str | None = None
-
-class Token(BaseModel):
-    token_acceso: str
-    tipo_token: str
-    nombre_usuario: Optional[str] = None
-
