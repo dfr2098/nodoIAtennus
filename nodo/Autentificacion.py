@@ -234,8 +234,7 @@ async def actualizar_datos_usuario(
     contrasena_actual: str,
     nombre_usuario: Optional[str] = None,
     contrasena: Optional[str] = None,
-    email: Optional[str] = None,
-    user_name: Optional[str] = None
+    email: Optional[str] = None
 ):
     # Obtener la contraseña actual del usuario
     contrasena_hasheada = await obtener_contrasena_usuario(id_usuario)
@@ -263,10 +262,6 @@ async def actualizar_datos_usuario(
     if email is not None:
         update_query += " correo_electronico=%s,"
         update_params.append(email)
-
-    if user_name is not None:
-        update_query += " user_name=%s,"
-        update_params.append(user_name)
 
     # Eliminar la coma adicional al final y agregar la condición WHERE
     update_query = update_query.rstrip(",") + " WHERE id_user_name=%s"

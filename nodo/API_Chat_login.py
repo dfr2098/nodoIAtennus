@@ -37,6 +37,10 @@ from jose import JWTError
 from functools import lru_cache
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+import language_tool_python
+
+# Inicializa el corrector ortográfico
+tool = language_tool_python.LanguageTool('es-ES')
 
 # Conexión a la base de datos de MongoDB asincrónica
 client = motor.motor_asyncio.AsyncIOMotorClient('192.168.1.120', 27018, serverSelectionTimeoutMS=5000, username='dfr209811', password='nostromo987Q_Q')
@@ -646,7 +650,7 @@ async def crear_usuario(
     contrasena: str = Form(..., min_length=5, max_length=15, description="La contraseña debe tener entre 5 y 15 caracteres"),
     confirmar_contrasena: str = Form(..., min_length=5, max_length=15, description="Repetir contraseña"),
     email: EmailStr = Form(..., description="Ingresa un correo"),
-    user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco")
+    user_name: str = Form(..., pattern=r'^\S+$', min_length=1, max_length=15, description="El username es único y no se puede cambiar, debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco")
 ):
 
     try:
@@ -883,7 +887,6 @@ async def editar_cuenta(
     nueva_contrasena: Optional[str] = Form(None, min_length=5, max_length=15, description="La nueva contraseña"),
     confirmar_contrasena: Optional[str] = Form(None, min_length=5, max_length=15, description="Repetir la nueva contraseña"),
     email: Optional[EmailStr] = Form(None, description="Ingresa un correo"),
-    user_name: Optional[str] = Form(None, pattern=r'^\S+$', min_length=1, max_length=15, description="El username debe tener entre 1 y 15 caracteres y no puede contener espacios en blanco"),
     usuario: DatosU = Depends(obtener_usuario_o_token)
 ):
     # Verificar si el usuario es registrado
@@ -912,29 +915,11 @@ async def editar_cuenta(
         )
 
     # Verificar si al menos uno de los parámetros es diferente de None
-    if all(v is None for v in [nombre_usuario, nueva_contrasena, email, user_name]):
+    if all(v is None for v in [nombre_usuario, nueva_contrasena, email]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Debe proporcionar al menos un parámetro para actualizar",
         )
-
-    # Verificar si el user_name ya existe en la base de datos
-    if user_name:
-        # Obtener la conexión a la base de datos
-        conexion_db = await obtener_conexion_db()
-
-        try:
-            async with conexion_db.cursor() as cursor:
-                await cursor.execute("SELECT COUNT(*) FROM usuarios WHERE user_name = %s AND id_user_name != %s", (user_name, id_usuario))
-                count = await cursor.fetchone()
-                if count[0] > 0:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="El nombre de usuario ya está en uso",
-                    )
-        finally:
-            # Cerrar la conexión a la base de datos
-            conexion_db.close()
 
     # Verificar si el email ya existe en la base de datos
     if email:
@@ -955,7 +940,9 @@ async def editar_cuenta(
             conexion_db.close()
            
     # Actualizar los datos del usuario en la base de datos
-    await actualizar_datos_usuario(id_usuario, contrasena_actual, nombre_usuario, nueva_contrasena, email, user_name)
+    await actualizar_datos_usuario(id_usuario, contrasena_actual, nombre_usuario, nueva_contrasena, email)
+    
+    user_name = DatosU.user_name
 
     # Generar un nuevo token de acceso
     duracion_token_acceso = timedelta(minutes=DURACION_TOKEN_ACCESO_EN_MINUTOS)
@@ -1026,7 +1013,9 @@ async def obtener_respuesta_chat(current_user: Union[DatosU, TokenAnonimo] = Dep
     if isinstance(current_user, DatosU):
         usuario_id = current_user.id_user_name
     elif isinstance(current_user, TokenAnonimo):
-        usuario_id = current_user.id_user_name 
+        usuario_id = current_user.id_user_name
+    
+    print(usuario_id)
 
     particion = custom_particionador.particion({"usuario_id": usuario_id})
 
@@ -1043,6 +1032,13 @@ async def obtener_respuesta_chat(current_user: Union[DatosU, TokenAnonimo] = Dep
 
     mensaje = datos_usuario.get("mensaje")
     usernameR = datos_usuario.get("username_usuario")
+    
+    # Corrige la ortografía del mensaje
+    matches = tool.check(mensaje)
+    for match in matches:
+        if match.replacements:
+            mensaje = mensaje[:match.offset] + match.replacements[0] + mensaje[match.offset + match.errorLength:]
+    
     intento = predecir_clase(mensaje)
     respuesta = obtener_respuesta(intento, intentos)
 
