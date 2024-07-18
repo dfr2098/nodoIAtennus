@@ -10,7 +10,6 @@ import pandas as pd
 import tensorflow as tf
 import os
 import re
-import shutil
 from sklearn.model_selection import train_test_split
 # Graficar la pérdida y la precisión durante el entrenamiento
 import matplotlib.pyplot as plt
