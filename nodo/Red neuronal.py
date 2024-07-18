@@ -1,7 +1,7 @@
 #NUEVO MODELO CON EL DATASET JSON ESPECIFICO 
 
-from keras.models import Sequential, Model
-from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda
+from keras.models import Model
+from keras.layers import Embedding, LSTM, Dense, Dropout, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda
 from keras.preprocessing.text import Tokenizer, text_to_word_sequence
 from keras.preprocessing.sequence import pad_sequences
 import pickle
@@ -13,10 +13,10 @@ import re
 from sklearn.model_selection import train_test_split
 # Graficar la pérdida y la precisión durante el entrenamiento
 import matplotlib.pyplot as plt
+from keras.utils import plot_model
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.layers import Wrapper
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, TensorBoard
-from keras.utils import plot_model
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.optimizers import AdamW
 from tensorflow.keras.optimizers.schedules import ExponentialDecay
