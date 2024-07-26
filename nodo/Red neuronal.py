@@ -1,7 +1,7 @@
 #NUEVO MODELO CON EL DATASET JSON ESPECIFICO 
 
-from keras.models import Model
-from keras.layers import Embedding, LSTM, Dense, Dropout, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda
+from keras.models import Sequential, Model
+from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation
 from keras.preprocessing.text import Tokenizer, text_to_word_sequence
 from keras.preprocessing.sequence import pad_sequences
 import pickle
@@ -13,15 +13,17 @@ import re
 from sklearn.model_selection import train_test_split
 # Graficar la pérdida y la precisión durante el entrenamiento
 import matplotlib.pyplot as plt
-from keras.utils import plot_model
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.layers import Wrapper
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, TensorBoard
+from keras.utils import plot_model
 from tensorflow.keras.regularizers import l2
-from tensorflow.keras.optimizers import AdamW
+from tensorflow.keras.optimizers import AdamW, Adam
 from tensorflow.keras.optimizers.schedules import ExponentialDecay
 import json
 import glob
+from tensorflow.keras.initializers import glorot_uniform, he_normal
+
 
 # Configurar la sesión de TensorFlow para utilizar la GPU
 config = tf.compat.v1.ConfigProto()
@@ -35,32 +37,33 @@ ruta_json = os.path.join(ruta_base_2, 'datos_e.json')
 ruta_dataset = os.path.join(ruta_base, 'espanol.parquet')
 ruta_base_3 = '/content/drive/My Drive/Red neuronal/Modelo LLM/Red LSTM'
 ruta_base_4 = '/content/drive/My Drive/Red neuronal/Modelo LLM/Red LSTM/Entrenamiento'
-ruta_embedding = os.path.join(ruta_base, 'modelo_reducido.vec')
-ruta_tokenizer = "/content/drive/My Drive/Red neuronal/Modelo LLM/Red LSTM/tokenizer_embedding_reducido.pkl"
+#ruta_embedding = os.path.join(ruta_base, 'modelo_reducido.vec')
+#ruta_tokenizer = "/content/drive/My Drive/Red neuronal/Modelo LLM/Red LSTM/tokenizer_modelo_reducido.pkl"
 ruta_modelo = "/content/drive/My Drive/Red neuronal/Modelo LLM/Red LSTM/solo_modelo.h5"
 
 ruta_hexagono = os.path.join(ruta_base_4, 'conocimiento_hexagono.json')
 ruta_conversacion = os.path.join(ruta_base_4, 'conversacion_datos.json')
 ruta_empresa = os.path.join(ruta_base_4, 'empresa_datos.json')
 
+#rutas extras
+# Ruta tokenizer nueva
+ruta_tokenizer = os.path.join(ruta_base_3, 'tokenizer_embedding_mejorado.pkl')
+
+# Ruta del archivo de embeddings
+ruta_embedding = '/content/drive/My Drive/Red neuronal/Modelo LLM/modelo_reducido_con_OOV.vec'
+
+#Ruta de la matriz de numpy
+ruta_archivo_numpy = os.path.join(ruta_base_3, 'embedding_matrix_ultima.npy')
+
 # Hiperparametros del modelo
-lstm_units = 64
+lstm_units = 128
 embedding_dim = 300
-num_epochs = 2
+num_epochs = 20
 maxlen = 100
-batch_size = 16
+batch_size = 15
 
 # Lista para almacenar los DataFrames de cada archivo JSON
 dataframes = []
-
-"""
-# Leer todos los archivos JSON en la carpeta
-for archivo in glob.glob(ruta_hexagono):
-    with open(archivo, 'r') as f:
-        data = json.load(f)
-    df = pd.DataFrame(data)
-    dataframes.append(df)
-"""
 
 # Leer todos los archivos JSON en la carpeta
 for archivo in glob.glob(ruta_base_4 + '/*.json'): # Añade '/*.json' para buscar archivos JSON dentro del directorio
@@ -97,16 +100,25 @@ print("\nPrimeras 5 secuencias de salida limpias:")
 for text in y_seq_lower[:5]:
     print(text)
 
-# Función para tokenizar texto, separando símbolos especiales
+# Función de tokenización que maneja caracteres especiales
 def tokenize_with_special_chars(text):
-    # Separar símbolos especiales y puntuación
     pattern = r'(\w+|[^\w\s])'
     return re.findall(pattern, text.lower())
 
-# Crear el tokenizer personalizado
 class CustomTokenizer(Tokenizer):
+    def __init__(self, embeddings_index, **kwargs):
+        super().__init__(**kwargs)
+        self.embeddings_index = embeddings_index
+        self.word_index = {word: i for i, word in enumerate(embeddings_index.keys(), start=1)}
+        self.index_word = {v: k for k, v in self.word_index.items()}
+
     def texts_to_sequences(self, texts):
-        return [[self.word_index.get(word, self.word_index.get('<OOV>')) for word in tokenize_with_special_chars(text)] for text in texts]
+        return [[self.word_index.get(word, self.word_index['<OOV>'])
+                 for word in tokenize_with_special_chars(text)]
+                for text in texts]
+
+    def get_vocab_size(self):
+        return len(self.word_index)
 
 # Cargar el tokenizer desde el archivo pickle
 with open(ruta_tokenizer, 'rb') as handle:
@@ -115,6 +127,7 @@ with open(ruta_tokenizer, 'rb') as handle:
 # Imprimir el número de palabras en el vocabulario del tokenizer
 print(f"El número de palabras en el vocabulario del tokenizer es: {len(tokenizer.word_index)}")
 print("aqui deberia salir la verificación de palabras")
+
 
 # Tokenización de X_seq_lower
 X_seq_tokenized = tokenizer.texts_to_sequences(X_seq_lower)
@@ -189,6 +202,13 @@ print(f"Las dimensiones de la matriz de embeddings son: ({num_palabras}, {embedd
 # Asignar la dimensión de salida
 output_dim = embedding_dim
 print(f"La dimensión de salida de los embeddings es: {output_dim}")
+
+# Asegurarse de que el vocabulario cubra todos los índices desde 0 hasta num_palabras - 1
+missing_indices = set(range(num_palabras)) - set(tokenizer.word_index.values())
+if missing_indices:
+    print(f"Índices faltantes en tokenizer.word_index: {missing_indices}")
+else:
+    print("Todos los índices están presentes en tokenizer.word_index.")
 
 #Hacer sólo un corpus
 texts = x_seq + y_seq
@@ -271,44 +291,12 @@ for i in range(5):
 # Divide los datos en conjuntos de prueba y entrenamiento
 x_train, x_test, y_train, y_test = train_test_split(x_seq_num_padded, y_seq_num_padded, test_size=0.2, random_state=42)
 
-# Crear una matriz de embeddings utilizando los coeficientes del diccionario y el vocabulario del tokenizer
-embedding_matrix = np.zeros((num_palabras, embedding_dim))
-batch_sizee = 1000  # Tamaño del lote para el procesamiento de embeddings
+#num_palabras = 100001
 
-# Contadores para palabras sin embedding y palabras fuera de rango
-palabras_sin_embedding = 0
-palabras_fuera_de_rango = 0
+num_palabras = tokenizer.get_vocab_size()
 
-# Imprimir el número de palabras en el vocabulario del tokenizer antes de crear la matriz de embeddings
-print(f"El número de palabras en el vocabulario del tokenizer antes de crear la matriz de embeddings es: {len(tokenizer.word_index)}")
-
-for i, (word, index) in enumerate(tokenizer.word_index.items()):
-    if index < num_palabras:
-        embedding_vector = embedding_index.get(word)
-        if embedding_vector is not None:
-            embedding_matrix[index] = embedding_vector
-        else:
-            palabras_sin_embedding += 1
-    else:
-        palabras_fuera_de_rango += 1
-
-    # Actualizar la matriz de embeddings en lotes más pequeños
-    if (i + 1) % batch_sizee == 0:
-        print(f"Procesando el lote {(i + 1) // batch_sizee} de {len(tokenizer.word_index) // batch_sizee + 1}")
-
-# Procesar el último lote si es necesario
-if len(tokenizer.word_index) % batch_sizee != 0:
-    print(f"Procesando el lote final de {len(tokenizer.word_index) // batch_sizee + 1}")
-
-# Imprimir el número de palabras en el vocabulario del tokenizer después de crear la matriz de embeddings
-print(f"El número de palabras en el vocabulario del tokenizer después de crear la matriz de embeddings es: {len(tokenizer.word_index)}")
-
-# Imprimir los contadores de palabras sin embedding y palabras fuera de rango
-print(f"Número de palabras sin embedding: {palabras_sin_embedding}")
-print(f"Número de palabras fuera de rango: {palabras_fuera_de_rango}")
-
-# Guardar la matriz de embeddings en la ruta especificada
-np.save(os.path.join(ruta_base_3, 'embedding_matrix.npy'), embedding_matrix)
+embedding_matrix = np.load(ruta_archivo_numpy)
+print(f"Forma de la matriz de embedding cargada: {embedding_matrix.shape}")
 
 # Habilitar el gradient checkpointing
 tf.config.experimental_run_functions_eagerly(True)
@@ -317,6 +305,7 @@ tf.config.experimental_run_functions_eagerly(True)
 policy = tf.keras.mixed_precision.Policy('mixed_float16')
 tf.keras.mixed_precision.set_global_policy(policy)
 
+""" Primera versión del modelo
 # Capa de embedding y entrada del modelo
 entrada = Input(shape=(maxlen,), name='entrada')
 capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim, weights=[embedding_matrix], trainable=True, mask_zero=True, dtype='float32', name='capa_embedding')(entrada)
@@ -334,32 +323,122 @@ capa_dropout_2 = Dropout(0.2, name='capa_dropout_2')(capa_normalizacion)
 capa_concatenacion = Concatenate(name='capa_concatenacion')([capa_lstm_1, capa_lstm_1])
 capa_atencion = Attention(name='capa_atencion')([capa_concatenacion, capa_concatenacion])
 
-# Capa densa y Dropout
-capa_densa_distribuida = Dense(units=embedding_dim, name='capa_densa_distribuida')(capa_atencion)
+# Capa densa distribuida y Dropout
+capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim), name='capa_densa_distribuida')(capa_atencion)
 capa_dropout_3 = Dropout(0.2, name='capa_dropout_3')(capa_densa_distribuida)
 
-
-# MIPS
-# Definir la función nuevamente
-def maximum_inner_product_search(query_embeddings, embedding_matrix):
-    query_embeddings = tf.cast(query_embeddings, tf.int32)
-    scores = tf.matmul(query_embeddings, embedding_matrix, transpose_b=True)
-    mips_indices = tf.argmax(scores, axis=-1)
-    return mips_indices
-
-# Convertir la matriz de embeddings a tensor
-embedding_matrix_tensor = tf.convert_to_tensor(embedding_matrix, dtype=tf.int32)
-
-salida_respuesta_indices = Lambda(lambda x: maximum_inner_product_search(x, embedding_matrix_tensor), name='salida_respuesta_indices')(capa_dropout_3)
+# Capa densa final y softmax distribuido
+capa_densa_final = TimeDistributed(Dense(units=num_palabras), name='capa_densa_final')(capa_dropout_3)
+salida_respuesta = tf.keras.layers.Activation('softmax', name='salida_respuesta')(capa_densa_final)
 
 # Modelo final
-modelo = Model(inputs=entrada, outputs=salida_respuesta_indices, name='Modelo_LSTM')
+modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM')
+"""
 
-# Compilación del modelo
-modelo.compile(optimizer='adam',
-              loss='sparse_categorical_crossentropy',
-              metrics=['accuracy'])
+""" Segunda versión del modelo
+# Capa de embedding y entrada del modelo
+entrada = Input(shape=(maxlen,), name='entrada')
+# Capa de embedding con inicializador glorot_uniform
+capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
+                           weights=[embedding_matrix], trainable=False,
+                           mask_zero=True, dtype='float32',
+                           name='capa_embedding',
+                           embeddings_initializer=glorot_uniform())(entrada)
+capa_dropout_1 = Dropout(0.3, name='capa_dropout_1')(capa_embedding)
 
+# Capas LSTM
+# Capas LSTM con inicializador he_normal
+capa_lstm_1 = LSTM(units=lstm_units, return_sequences=True,
+                   kernel_initializer=he_normal(),
+                   recurrent_initializer=he_normal(),
+                   name='capa_lstm_1')(capa_dropout_1)
+capa_lstm_2 = LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_2')(capa_lstm_1)  # Cambiado a return_sequences=True
+
+# Normalización y Dropout
+capa_normalizacion = LayerNormalization(name='capa_normalizacion')(capa_lstm_2)
+capa_dropout_2 = Dropout(0.3, name='capa_dropout_2')(capa_normalizacion)
+
+# Concatenación y Atención
+capa_concatenacion = Concatenate(name='capa_concatenacion')([capa_lstm_1, capa_lstm_2])
+capa_atencion = Attention(name='capa_atencion')([capa_concatenacion, capa_concatenacion])
+
+# Capa densa distribuida y Dropout
+capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim), name='capa_densa_distribuida')(capa_atencion)
+capa_dropout_3 = Dropout(0.3, name='capa_dropout_3')(capa_densa_distribuida)
+
+# Capa densa final y softmax distribuido
+# Capa densa con L2 regularization
+capa_densa_final = TimeDistributed(Dense(units=num_palabras,
+                                         kernel_regularizer=l2(0.01)),
+                                   name='capa_densa_final')(capa_dropout_3)
+salida_respuesta = tf.keras.layers.Activation('softmax', name='salida_respuesta')(capa_densa_final)
+
+# Modelo final
+modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM')
+
+# Optimizador AdamW con gradient clipping
+optimizer = AdamW(learning_rate=0.001, weight_decay=1e-5, clipnorm=1.0)
+
+# Compilar el modelo con el nuevo optimizador
+modelo.compile(optimizer=optimizer,
+               loss='sparse_categorical_crossentropy',
+               metrics=['accuracy'])
+
+# Resumen del modelo
+modelo.summary()
+
+# Guardar el modelo en un archivo HDF5
+modelo.save(os.path.join(ruta_base_3, "solo_modelo_nuevaArq.h5"))
+"""
+
+# Capa de embedding y entrada del modelo
+entrada = Input(shape=(maxlen,), name='entrada')
+# Capa de embedding con inicializador glorot_uniform
+capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
+                           weights=[embedding_matrix], trainable=True,  # Cambiado a True
+                           mask_zero=True, dtype='float32',
+                           name='capa_embedding',
+                           embeddings_initializer=glorot_uniform())(entrada)
+capa_dropout_1 = Dropout(0.2, name='capa_dropout_1')(capa_embedding)  # Dropout reducido al 20%
+
+# Capas LSTM
+# Capas LSTM con inicializador he_normal
+capa_lstm_1 = LSTM(units=lstm_units, return_sequences=True,
+                   kernel_initializer=he_normal(),
+                   recurrent_initializer=he_normal(),
+                   name='capa_lstm_1')(capa_dropout_1)
+capa_lstm_2 = LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_2')(capa_lstm_1)  # Cambiado a return_sequences=True
+capa_lstm_3 = LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_3')(capa_lstm_2)  # Nueva capa LSTM añadida
+
+# Normalización y Dropout
+capa_normalizacion = LayerNormalization(name='capa_normalizacion')(capa_lstm_3)  # Aplicada a la nueva capa LSTM
+capa_dropout_2 = Dropout(0.2, name='capa_dropout_2')(capa_normalizacion)  # Dropout reducido al 20%
+
+# Concatenación y Atención
+capa_concatenacion = Concatenate(name='capa_concatenacion')([capa_lstm_1, capa_lstm_2, capa_lstm_3])  # Nueva capa LSTM incluida
+capa_atencion = Attention(name='capa_atencion')([capa_concatenacion, capa_concatenacion])
+
+# Capa densa distribuida y Dropout
+capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim), name='capa_densa_distribuida')(capa_atencion)
+capa_dropout_3 = Dropout(0.2, name='capa_dropout_3')(capa_densa_distribuida)  # Dropout reducido al 20%
+
+# Capa densa final y softmax distribuido
+# Capa densa con L2 regularization
+capa_densa_final = TimeDistributed(Dense(units=num_palabras,
+                                         kernel_regularizer=l2(0.01)),
+                                   name='capa_densa_final')(capa_dropout_3)
+salida_respuesta = Activation('softmax', name='salida_respuesta')(capa_densa_final)
+
+# Modelo final
+modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM')
+
+# Optimizador AdamW con gradient clipping
+optimizer = AdamW(learning_rate=0.001, weight_decay=1e-5, clipnorm=1.0)
+
+# Compilar el modelo con el nuevo optimizador
+modelo.compile(optimizer=optimizer,
+               loss='sparse_categorical_crossentropy',
+               metrics=['accuracy'])
 
 # Resumen del modelo
 modelo.summary()
