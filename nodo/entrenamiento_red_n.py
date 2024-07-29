@@ -1,7 +1,7 @@
-#Entrenamiento del modelo de arriba con los datos JSON
+#Entrenamiento del modelo de arriba con los datos JSON y metricas especiales, SIN TANTO COMENTARIO
 
 from keras.models import Sequential, Model
-from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation
+from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation, Bidirectional, GRU, Conv1D, MaxPooling1D
 from keras.preprocessing.text import Tokenizer, text_to_word_sequence
 from keras.preprocessing.sequence import pad_sequences
 import pickle
@@ -62,8 +62,9 @@ ruta_modelo_nuevaArq = os.path.join(ruta_base_3, 'solo_modelo_nuevaArq.h5')
 lstm_units = 128
 embedding_dim = 300
 num_epochs = 20
-maxlen = 100
-batch_size = 15
+maxlen = 211
+batch_size = 16
+num_palabras = 100000
 
 # Lista para almacenar los DataFrames de cada archivo JSON
 dataframes = []
@@ -291,7 +292,7 @@ num_palabras = tokenizer.get_vocab_size()
 embedding_matrix = np.load(ruta_archivo_numpy)
 print(f"Forma de la matriz de embedding cargada: {embedding_matrix.shape}")
 
-"""
+"""PRIMERA VERSIÓN
 # Habilitar el gradient checkpointing
 tf.config.experimental_run_functions_eagerly(True)
 
@@ -399,7 +400,7 @@ resultados = modelo.evaluate(x_test, y_test, verbose=1)
 print(f'Pérdida: {resultados[0]}, Precisión: {resultados[1]}')
 """
 
-"""
+""" SEGUNDA VERSIÓN
 # Habilitar el gradient checkpointing
 tf.config.experimental_run_functions_eagerly(True)
 
@@ -437,7 +438,7 @@ class PerplexityCallback(tf.keras.callbacks.Callback):
 # Planificador de tasa de aprendizaje
 def lr_schedule(epoch):
     initial_lr = 0.001  # Ajuste de la tasa de aprendizaje inicial
-    if epoch < 3:  
+    if epoch < 3:
         return initial_lr
     else:
         return initial_lr * tf.math.exp(-0.1 * (epoch - 3))
@@ -499,10 +500,20 @@ checkpoint = ModelCheckpoint(f'{ruta_base_3}checkpoint-{{epoch:02d}}.h5',
                              monitor='val_loss',
                              mode='min')
 
-tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=1, profile_batch=0)
+class LRTensorBoard(TensorBoard):
+    def __init__(self, log_dir, **kwargs):
+        super().__init__(log_dir=log_dir, **kwargs)
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        logs['lr'] = self.model.optimizer.lr
+        super().on_epoch_end(epoch, logs)
+
+tensorboard_callback = LRTensorBoard(log_dir=log_dir, histogram_freq=1, profile_batch=0)
 
 # Optimizer AdamW con gradient clipping
-optimizer = AdamW(learning_rate=0.0001, weight_decay=1e-5, clipnorm=1.0)
+#optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-4, clipnorm=0.5) #de 0.0001 a 0.0005, 0.0003, 0.00075
+optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
 
 # Recompilar el modelo con el nuevo optimizador
 modelo.compile(optimizer=optimizer,
@@ -545,13 +556,13 @@ class GradientNormCallback(tf.keras.callbacks.Callback):
 
         # Calcular los gradientes
         gradients = get_gradients()
-        
+
         # Calcular la norma global de los gradientes
         global_norm = tf.linalg.global_norm(gradients)
-        
+
         # Guardar la norma del gradiente
         self.gradient_norms.append(global_norm.numpy())
-        
+
         # Registrar la norma del gradiente en TensorBoard
         tf.summary.scalar('gradient_norm', global_norm, step=optimizer.iterations)
 
@@ -567,16 +578,19 @@ train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(16)
 perplexity_callback = PerplexityCallback()
 gradient_norm_callback = GradientNormCallback(train_dataset)
 
-# Planificador de tasa de aprendizaje
-def lr_schedule(epoch):
-    initial_lr = 0.0001
-    return initial_lr * (0.9 ** epoch)
+# Función de planificación de tasa de aprendizaje modificada
+def cyclic_lr_with_warmup(epoch, initial_lr=0.0001, max_lr=0.0003, warmup_epochs=3, cycle_length=8):
+    if epoch < warmup_epochs:
+        return initial_lr + (max_lr - initial_lr) * epoch / warmup_epochs
+    else:
+        cycle = np.floor(1 + (epoch - warmup_epochs) / cycle_length)
+        x = np.abs((epoch - warmup_epochs) / cycle_length - 2 * cycle + 1)
+        return initial_lr + (max_lr - initial_lr) * max(0, (1 - x)) * 0.5 ** (cycle - 1)
 
-lr_scheduler = LearningRateScheduler(lr_schedule)
-
-# Configurar los callbacks
-early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6)
+# Callbacks modificados
+lr_scheduler = LearningRateScheduler(cyclic_lr_with_warmup)
+early_stopping = EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=5e-6)
 
 # Entrenar el modelo
 history = modelo.fit(

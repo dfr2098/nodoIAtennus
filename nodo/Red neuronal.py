@@ -1,7 +1,7 @@
 #NUEVO MODELO CON EL DATASET JSON ESPECIFICO 
 
 from keras.models import Sequential, Model
-from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation
+from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation, Bidirectional, GRU, Conv1D, MaxPooling1D
 from keras.preprocessing.text import Tokenizer, text_to_word_sequence
 from keras.preprocessing.sequence import pad_sequences
 import pickle
@@ -10,6 +10,7 @@ import pandas as pd
 import tensorflow as tf
 import os
 import re
+import shutil
 from sklearn.model_selection import train_test_split
 # Graficar la pérdida y la precisión durante el entrenamiento
 import matplotlib.pyplot as plt
@@ -59,8 +60,9 @@ ruta_archivo_numpy = os.path.join(ruta_base_3, 'embedding_matrix_ultima.npy')
 lstm_units = 128
 embedding_dim = 300
 num_epochs = 20
-maxlen = 100
-batch_size = 15
+maxlen = 211
+batch_size = 16
+num_palabras = 100000
 
 # Lista para almacenar los DataFrames de cada archivo JSON
 dataframes = []
@@ -393,49 +395,52 @@ modelo.save(os.path.join(ruta_base_3, "solo_modelo_nuevaArq.h5"))
 
 # Capa de embedding y entrada del modelo
 entrada = Input(shape=(maxlen,), name='entrada')
-# Capa de embedding con inicializador glorot_uniform
 capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
-                           weights=[embedding_matrix], trainable=True,  # Cambiado a True
+                           weights=[embedding_matrix], trainable=True,
                            mask_zero=True, dtype='float32',
                            name='capa_embedding',
                            embeddings_initializer=glorot_uniform())(entrada)
-capa_dropout_1 = Dropout(0.2, name='capa_dropout_1')(capa_embedding)  # Dropout reducido al 20%
+capa_dropout_1 = Dropout(0.3, name='capa_dropout_1')(capa_embedding)
 
-# Capas LSTM
-# Capas LSTM con inicializador he_normal
-capa_lstm_1 = LSTM(units=lstm_units, return_sequences=True,
+# Capa convolucional
+capa_conv = Conv1D(filters=256, kernel_size=3, padding='same', activation='relu', name='capa_conv')(capa_dropout_1)
+capa_pooling = MaxPooling1D(pool_size=1, padding='same', name='capa_pooling')(capa_conv)
+
+# Capas LSTM bidireccionales
+capa_lstm_1 = Bidirectional(LSTM(units=lstm_units, return_sequences=True,
                    kernel_initializer=he_normal(),
                    recurrent_initializer=he_normal(),
-                   name='capa_lstm_1')(capa_dropout_1)
-capa_lstm_2 = LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_2')(capa_lstm_1)  # Cambiado a return_sequences=True
-capa_lstm_3 = LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_3')(capa_lstm_2)  # Nueva capa LSTM añadida
+                   name='capa_lstm_1'))(capa_pooling)
+capa_lstm_2 = Bidirectional(LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_2'))(capa_lstm_1)
+capa_lstm_3 = Bidirectional(LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_3'))(capa_lstm_2)
 
 # Normalización y Dropout
-capa_normalizacion = LayerNormalization(name='capa_normalizacion')(capa_lstm_3)  # Aplicada a la nueva capa LSTM
-capa_dropout_2 = Dropout(0.2, name='capa_dropout_2')(capa_normalizacion)  # Dropout reducido al 20%
+capa_normalizacion = LayerNormalization(name='capa_normalizacion')(capa_lstm_3)
+capa_dropout_2 = Dropout(0.3, name='capa_dropout_2')(capa_normalizacion)
 
 # Concatenación y Atención
-capa_concatenacion = Concatenate(name='capa_concatenacion')([capa_lstm_1, capa_lstm_2, capa_lstm_3])  # Nueva capa LSTM incluida
+capa_concatenacion = Concatenate(name='capa_concatenacion')([capa_lstm_1, capa_lstm_2, capa_lstm_3])
 capa_atencion = Attention(name='capa_atencion')([capa_concatenacion, capa_concatenacion])
 
 # Capa densa distribuida y Dropout
-capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim), name='capa_densa_distribuida')(capa_atencion)
-capa_dropout_3 = Dropout(0.2, name='capa_dropout_3')(capa_densa_distribuida)  # Dropout reducido al 20%
+capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim,
+                                               kernel_regularizer=l2(0.001),
+                                               activation='relu'),
+                                         name='capa_densa_distribuida')(capa_atencion)
+capa_dropout_3 = Dropout(0.3, name='capa_dropout_3')(capa_densa_distribuida)
 
 # Capa densa final y softmax distribuido
-# Capa densa con L2 regularization
 capa_densa_final = TimeDistributed(Dense(units=num_palabras,
-                                         kernel_regularizer=l2(0.01)),
+                                         kernel_regularizer=l2(0.001)),
                                    name='capa_densa_final')(capa_dropout_3)
 salida_respuesta = Activation('softmax', name='salida_respuesta')(capa_densa_final)
 
 # Modelo final
-modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM')
+modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM_Mejorado')
 
-# Optimizador AdamW con gradient clipping
-optimizer = AdamW(learning_rate=0.001, weight_decay=1e-5, clipnorm=1.0)
+# Optimizador y compilación
+optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
 
-# Compilar el modelo con el nuevo optimizador
 modelo.compile(optimizer=optimizer,
                loss='sparse_categorical_crossentropy',
                metrics=['accuracy'])
