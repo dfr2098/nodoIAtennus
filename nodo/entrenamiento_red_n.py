@@ -1,4 +1,4 @@
-#Entrenamiento del modelo de arriba con los datos JSON y metricas especiales, SIN TANTO COMENTARIO
+#Entrenamiento del modelo de arriba con los datos JSON y metricas especiales
 
 from keras.models import Sequential, Model
 from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation, Bidirectional, GRU, Conv1D, MaxPooling1D
@@ -25,11 +25,14 @@ import json
 import glob
 from tensorflow.keras.models import load_model
 from tensorflow.keras.initializers import glorot_uniform, he_normal
+import tensorflow_addons as tfa
+from tensorflow_addons.optimizers import RectifiedAdam, Lookahead
 
 # Configurar la sesión de TensorFlow para utilizar la GPU
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
+
 
 ruta_base = '/content/drive/My Drive/Red neuronal/Modelo LLM'
 ruta_archivo = os.path.join(ruta_base, 'cc.es.300.vec')
@@ -500,6 +503,14 @@ checkpoint = ModelCheckpoint(f'{ruta_base_3}checkpoint-{{epoch:02d}}.h5',
                              monitor='val_loss',
                              mode='min')
 
+best_model_callback = ModelCheckpoint(
+    filepath=os.path.join(ruta_base_3, 'best_model.h5'),
+    save_best_only=True,
+    monitor='val_loss',
+    mode='min',
+    verbose=1
+)
+
 class LRTensorBoard(TensorBoard):
     def __init__(self, log_dir, **kwargs):
         super().__init__(log_dir=log_dir, **kwargs)
@@ -511,9 +522,16 @@ class LRTensorBoard(TensorBoard):
 
 tensorboard_callback = LRTensorBoard(log_dir=log_dir, histogram_freq=1, profile_batch=0)
 
+
 # Optimizer AdamW con gradient clipping
 #optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-4, clipnorm=0.5) #de 0.0001 a 0.0005, 0.0003, 0.00075
 optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
+
+"""
+# Optimizer AdamW con gradient clipping y Lookahead
+base_optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
+optimizer = Lookahead(base_optimizer, sync_period=6, slow_step_size=0.5)
+"""
 
 # Recompilar el modelo con el nuevo optimizador
 modelo.compile(optimizer=optimizer,
@@ -579,7 +597,7 @@ perplexity_callback = PerplexityCallback()
 gradient_norm_callback = GradientNormCallback(train_dataset)
 
 # Función de planificación de tasa de aprendizaje modificada
-def cyclic_lr_with_warmup(epoch, initial_lr=0.0001, max_lr=0.0003, warmup_epochs=3, cycle_length=8):
+def cyclic_lr_with_warmup(epoch, initial_lr=0.0001, max_lr=0.0003, warmup_epochs=2, cycle_length=5):
     if epoch < warmup_epochs:
         return initial_lr + (max_lr - initial_lr) * epoch / warmup_epochs
     else:
@@ -587,18 +605,45 @@ def cyclic_lr_with_warmup(epoch, initial_lr=0.0001, max_lr=0.0003, warmup_epochs
         x = np.abs((epoch - warmup_epochs) / cycle_length - 2 * cycle + 1)
         return initial_lr + (max_lr - initial_lr) * max(0, (1 - x)) * 0.5 ** (cycle - 1)
 
+
 # Callbacks modificados
 lr_scheduler = LearningRateScheduler(cyclic_lr_with_warmup)
+
+"""
 early_stopping = EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=5e-6)
+"""
 
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6, verbose=1)
+
+# Optimizar el Data Pipeline
+def prepare_dataset(x, y, batch_size):
+    dataset = tf.data.Dataset.from_tensor_slices((x, y))
+    return dataset.cache().shuffle(buffer_size=1000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+
+train_dataset = prepare_dataset(x_train, y_train, batch_size=16)
+val_dataset = prepare_dataset(x_test, y_test, batch_size=16)
+
+
+"""
 # Entrenar el modelo
 history = modelo.fit(
     x_train, y_train,
     epochs=20,
     batch_size=16,
     validation_split=0.2,
-    callbacks=[early_stopping, reduce_lr, checkpoint, tensorboard_callback, perplexity_callback, lr_scheduler, gradient_norm_callback]
+    callbacks=[early_stopping, reduce_lr, checkpoint, tensorboard_callback, perplexity_callback, lr_scheduler, gradient_norm_callback, best_model_callback]
+)
+"""
+
+# Entrenar el modelo
+history = modelo.fit(
+    train_dataset,
+    epochs=20,
+    batch_size=16,
+    validation_data=val_dataset,
+    callbacks=[early_stopping, reduce_lr, checkpoint, tensorboard_callback, perplexity_callback, lr_scheduler, gradient_norm_callback, best_model_callback]
 )
 
 # Guardar el modelo entrenado
@@ -606,5 +651,6 @@ modelo.save(os.path.join(ruta_base_3, 'chatbot_model.h5'))
 modelo.save_weights(os.path.join(ruta_base_3, "pesos_modelo_nuevaArq.h5"))
 
 # Evaluar el modelo en el conjunto de prueba
+test_dataset = prepare_dataset(x_test, y_test, batch_size=16)
 resultados = modelo.evaluate(x_test, y_test, verbose=1)
 print(f'Pérdida: {resultados[0]}, Precisión: {resultados[1]}')

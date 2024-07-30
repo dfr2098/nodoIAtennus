@@ -24,7 +24,8 @@ from tensorflow.keras.optimizers.schedules import ExponentialDecay
 import json
 import glob
 from tensorflow.keras.initializers import glorot_uniform, he_normal
-
+import tensorflow_addons as tfa
+from tensorflow_addons.optimizers import RectifiedAdam, Lookahead
 
 # Configurar la sesión de TensorFlow para utilizar la GPU
 config = tf.compat.v1.ConfigProto()
@@ -400,7 +401,7 @@ capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
                            mask_zero=True, dtype='float32',
                            name='capa_embedding',
                            embeddings_initializer=glorot_uniform())(entrada)
-capa_dropout_1 = Dropout(0.3, name='capa_dropout_1')(capa_embedding)
+capa_dropout_1 = Dropout(0.2, name='capa_dropout_1')(capa_embedding)
 
 # Capa convolucional
 capa_conv = Conv1D(filters=256, kernel_size=3, padding='same', activation='relu', name='capa_conv')(capa_dropout_1)
@@ -416,7 +417,7 @@ capa_lstm_3 = Bidirectional(LSTM(units=lstm_units, return_sequences=True, name='
 
 # Normalización y Dropout
 capa_normalizacion = LayerNormalization(name='capa_normalizacion')(capa_lstm_3)
-capa_dropout_2 = Dropout(0.3, name='capa_dropout_2')(capa_normalizacion)
+capa_dropout_2 = Dropout(0.2, name='capa_dropout_2')(capa_normalizacion)
 
 # Concatenación y Atención
 capa_concatenacion = Concatenate(name='capa_concatenacion')([capa_lstm_1, capa_lstm_2, capa_lstm_3])
@@ -427,7 +428,7 @@ capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim,
                                                kernel_regularizer=l2(0.001),
                                                activation='relu'),
                                          name='capa_densa_distribuida')(capa_atencion)
-capa_dropout_3 = Dropout(0.3, name='capa_dropout_3')(capa_densa_distribuida)
+capa_dropout_3 = Dropout(0.2, name='capa_dropout_3')(capa_densa_distribuida)
 
 # Capa densa final y softmax distribuido
 capa_densa_final = TimeDistributed(Dense(units=num_palabras,
@@ -438,8 +439,15 @@ salida_respuesta = Activation('softmax', name='salida_respuesta')(capa_densa_fin
 # Modelo final
 modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM_Mejorado')
 
+
 # Optimizador y compilación
 optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
+
+"""
+# Optimizer AdamW con gradient clipping y Lookahead
+base_optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
+optimizer = Lookahead(base_optimizer, sync_period=6, slow_step_size=0.5)
+"""
 
 modelo.compile(optimizer=optimizer,
                loss='sparse_categorical_crossentropy',
