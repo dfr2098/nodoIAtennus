@@ -1,8 +1,8 @@
-#NUEVO MODELO CON EL DATASET JSON ESPECIFICO 
+#NUEVO MODELO CON EL DATASET JSON ESPECIFICO
 
 from keras.models import Sequential, Model
-from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation, Bidirectional, GRU, Conv1D, MaxPooling1D
-from keras.preprocessing.text import Tokenizer, text_to_word_sequence
+from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation, Bidirectional, GRU, Conv1D, MaxPooling1D, SpatialDropout1D
+from tensorflow.keras.preprocessing.text import Tokenizer, text_to_word_sequence
 from keras.preprocessing.sequence import pad_sequences
 import pickle
 import numpy as np
@@ -24,13 +24,27 @@ from tensorflow.keras.optimizers.schedules import ExponentialDecay
 import json
 import glob
 from tensorflow.keras.initializers import glorot_uniform, he_normal
-import tensorflow_addons as tfa
-from tensorflow_addons.optimizers import RectifiedAdam, Lookahead
+#import tensorflow_addons as tfa
+#from tensorflow_addons.optimizers import RectifiedAdam, Lookahead
+#import tensorflow.keras.backend as K
+
 
 # Configurar la sesión de TensorFlow para utilizar la GPU
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
+
+"""
+# Configurar el crecimiento dinámico de la memoria GPU
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Restringir la memoria GPU para que crezca según sea necesario
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+"""
 
 ruta_base = '/content/drive/My Drive/Red neuronal/Modelo LLM'
 ruta_archivo = os.path.join(ruta_base, 'cc.es.300.vec')
@@ -302,7 +316,7 @@ embedding_matrix = np.load(ruta_archivo_numpy)
 print(f"Forma de la matriz de embedding cargada: {embedding_matrix.shape}")
 
 # Habilitar el gradient checkpointing
-tf.config.experimental_run_functions_eagerly(True)
+tf.config.run_functions_eagerly(True)
 
 # Habilitar el entrenamiento de precisión mixta
 policy = tf.keras.mixed_precision.Policy('mixed_float16')
@@ -338,24 +352,27 @@ salida_respuesta = tf.keras.layers.Activation('softmax', name='salida_respuesta'
 modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM')
 """
 
-""" Segunda versión del modelo
-# Capa de embedding y entrada del modelo
+"""
+# Definir la entrada
 entrada = Input(shape=(maxlen,), name='entrada')
-# Capa de embedding con inicializador glorot_uniform
+
+
+# Crear la capa Embedding
 capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
                            weights=[embedding_matrix], trainable=False,
                            mask_zero=True, dtype='float32',
                            name='capa_embedding',
                            embeddings_initializer=glorot_uniform())(entrada)
+
+# Aplicar Dropout
 capa_dropout_1 = Dropout(0.3, name='capa_dropout_1')(capa_embedding)
 
 # Capas LSTM
-# Capas LSTM con inicializador he_normal
 capa_lstm_1 = LSTM(units=lstm_units, return_sequences=True,
                    kernel_initializer=he_normal(),
                    recurrent_initializer=he_normal(),
                    name='capa_lstm_1')(capa_dropout_1)
-capa_lstm_2 = LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_2')(capa_lstm_1)  # Cambiado a return_sequences=True
+capa_lstm_2 = LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_2')(capa_lstm_1)
 
 # Normalización y Dropout
 capa_normalizacion = LayerNormalization(name='capa_normalizacion')(capa_lstm_2)
@@ -370,7 +387,6 @@ capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim), name='capa_
 capa_dropout_3 = Dropout(0.3, name='capa_dropout_3')(capa_densa_distribuida)
 
 # Capa densa final y softmax distribuido
-# Capa densa con L2 regularization
 capa_densa_final = TimeDistributed(Dense(units=num_palabras,
                                          kernel_regularizer=l2(0.01)),
                                    name='capa_densa_final')(capa_dropout_3)
@@ -378,6 +394,9 @@ salida_respuesta = tf.keras.layers.Activation('softmax', name='salida_respuesta'
 
 # Modelo final
 modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM')
+
+
+
 
 # Optimizador AdamW con gradient clipping
 optimizer = AdamW(learning_rate=0.001, weight_decay=1e-5, clipnorm=1.0)
@@ -394,6 +413,7 @@ modelo.summary()
 modelo.save(os.path.join(ruta_base_3, "solo_modelo_nuevaArq.h5"))
 """
 
+
 # Capa de embedding y entrada del modelo
 entrada = Input(shape=(maxlen,), name='entrada')
 capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
@@ -401,7 +421,8 @@ capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
                            mask_zero=True, dtype='float32',
                            name='capa_embedding',
                            embeddings_initializer=glorot_uniform())(entrada)
-capa_dropout_1 = Dropout(0.2, name='capa_dropout_1')(capa_embedding)
+#capa_dropout_1 = Dropout(0.2, name='capa_dropout_1')(capa_embedding)
+capa_dropout_1 = SpatialDropout1D(0.2, name='capa_dropout_1')(capa_embedding)
 
 # Capa convolucional
 capa_conv = Conv1D(filters=256, kernel_size=3, padding='same', activation='relu', name='capa_conv')(capa_dropout_1)
@@ -440,8 +461,60 @@ salida_respuesta = Activation('softmax', name='salida_respuesta')(capa_densa_fin
 modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM_Mejorado')
 
 
-# Optimizador y compilación
-optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
+"""
+# Función lambda para quitar la máscara
+def remove_mask(x):
+    return x
+
+# Capa de embedding y entrada del modelo
+entrada = Input(shape=(maxlen,), name='entrada')
+capa_embedding = Embedding(input_dim=num_palabras, output_dim=embedding_dim,
+                           weights=[embedding_matrix], trainable=True,
+                           mask_zero=True, dtype='float32',
+                           name='capa_embedding',
+                           embeddings_initializer=glorot_uniform())(entrada)
+capa_dropout_1 = Dropout(0.2, name='capa_dropout_1')(capa_embedding)
+
+# Quitar la máscara antes de la capa convolucional
+capa_sin_mascara = Lambda(remove_mask, name='remove_mask')(capa_dropout_1)
+
+# Capa convolucional
+capa_conv = Conv1D(filters=256, kernel_size=3, padding='same', activation='relu', name='capa_conv')(capa_sin_mascara)
+capa_pooling = MaxPooling1D(pool_size=1, padding='same', name='capa_pooling')(capa_conv)
+
+# Capas LSTM bidireccionales
+capa_lstm_1 = Bidirectional(LSTM(units=lstm_units, return_sequences=True,
+                                 kernel_initializer=he_normal(),
+                                 recurrent_initializer=he_normal(),
+                                 name='capa_lstm_1'))(capa_pooling)
+capa_lstm_2 = Bidirectional(LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_2'))(capa_lstm_1)
+capa_lstm_3 = Bidirectional(LSTM(units=lstm_units, return_sequences=True, name='capa_lstm_3'))(capa_lstm_2)
+
+# Normalización y Dropout
+capa_normalizacion = LayerNormalization(name='capa_normalizacion')(capa_lstm_3)
+capa_dropout_2 = Dropout(0.2, name='capa_dropout_2')(capa_normalizacion)
+
+# Concatenación y Atención
+capa_concatenacion = Concatenate(name='capa_concatenacion')([capa_lstm_1, capa_lstm_2, capa_lstm_3])
+capa_atencion = Attention(name='capa_atencion')([capa_concatenacion, capa_concatenacion])
+
+# Capa densa distribuida y Dropout
+capa_densa_distribuida = TimeDistributed(Dense(units=embedding_dim,
+                                               kernel_regularizer=l2(0.001),
+                                               activation='relu'),
+                                         name='capa_densa_distribuida')(capa_atencion)
+capa_dropout_3 = Dropout(0.2, name='capa_dropout_3')(capa_densa_distribuida)
+
+# Capa densa final y softmax distribuido
+capa_densa_final = TimeDistributed(Dense(units=num_palabras,
+                                         kernel_regularizer=l2(0.001)),
+                                   name='capa_densa_final')(capa_dropout_3)
+salida_respuesta = Activation('softmax', name='salida_respuesta')(capa_densa_final)
+
+# Modelo final
+modelo = Model(inputs=entrada, outputs=salida_respuesta, name='Modelo_LSTM_Mejorado')
+"""
+
 
 """
 # Optimizer AdamW con gradient clipping y Lookahead
@@ -449,15 +522,22 @@ base_optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
 optimizer = Lookahead(base_optimizer, sync_period=6, slow_step_size=0.5)
 """
 
+"""
+# Optimizador y compilación
+optimizer = AdamW(learning_rate=0.0002, weight_decay=1e-5, clipnorm=1.0)
+
 modelo.compile(optimizer=optimizer,
                loss='sparse_categorical_crossentropy',
                metrics=['accuracy'])
+"""
 
 # Resumen del modelo
 modelo.summary()
 
+#print(modelo.get_config())
+
 # Guardar el modelo en un archivo HDF5
-modelo.save(os.path.join(ruta_base_3, "solo_modelo_nuevaArq.h5"))
+modelo.save(os.path.join(ruta_base_3, "solo_modelo_nuevaArq.keras"))
 
 # Visualizar y guardar la arquitectura del modelo en la ruta especificada en la variable "ruta_base_3"
 plot_model(modelo, to_file=ruta_base_3 + 'modelo_plot.png', show_shapes=True, show_layer_names=True)

@@ -1,8 +1,8 @@
 #Entrenamiento del modelo de arriba con los datos JSON y metricas especiales
 
 from keras.models import Sequential, Model
-from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation, Bidirectional, GRU, Conv1D, MaxPooling1D
-from keras.preprocessing.text import Tokenizer, text_to_word_sequence
+from keras.layers import Embedding, LSTM, Dense, TimeDistributed, Dropout, GlobalAveragePooling1D, Input, Attention, LayerNormalization, Add, Concatenate, Reshape, Lambda, Activation, Bidirectional, GRU, Conv1D, MaxPooling1D, SpatialDropout1D
+from tensorflow.keras.preprocessing.text import Tokenizer, text_to_word_sequence
 from keras.preprocessing.sequence import pad_sequences
 import pickle
 import numpy as np
@@ -25,13 +25,29 @@ import json
 import glob
 from tensorflow.keras.models import load_model
 from tensorflow.keras.initializers import glorot_uniform, he_normal
-import tensorflow_addons as tfa
-from tensorflow_addons.optimizers import RectifiedAdam, Lookahead
+#import tensorflow_addons as tfa
+#from tensorflow_addons.optimizers import RectifiedAdam, Lookahead
+#import tensorflow.keras.backend as K
+#from keras.utils import custom_object_scope
+
 
 # Configurar la sesión de TensorFlow para utilizar la GPU
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
+
+
+"""
+# Configurar el crecimiento dinámico de la memoria GPU
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Restringir la memoria GPU para que crezca según sea necesario
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+"""
 
 
 ruta_base = '/content/drive/My Drive/Red neuronal/Modelo LLM'
@@ -59,7 +75,7 @@ ruta_embedding = '/content/drive/My Drive/Red neuronal/Modelo LLM/modelo_reducid
 #Ruta de la matriz de numpy
 ruta_archivo_numpy = os.path.join(ruta_base_3, 'embedding_matrix_ultima.npy')
 
-ruta_modelo_nuevaArq = os.path.join(ruta_base_3, 'solo_modelo_nuevaArq.h5')
+ruta_modelo_nuevaArq = os.path.join(ruta_base_3, 'solo_modelo_nuevaArq.keras')
 
 # Hiperparametros del modelo
 lstm_units = 128
@@ -480,14 +496,14 @@ print(f'Pérdida: {resultados[0]}, Precisión: {resultados[1]}')
 """
 
 # Habilitar el gradient checkpointing
-tf.config.experimental_run_functions_eagerly(True)
+tf.config.run_functions_eagerly(True)
 
 # Habilitar el entrenamiento de precisión mixta
 policy = tf.keras.mixed_precision.Policy('mixed_float16')
 tf.keras.mixed_precision.set_global_policy(policy)
 
 # Cargar el modelo
-modelo = load_model(ruta_modelo_nuevaArq, custom_objects={'AdamW': AdamW, 'Softmax': tf.keras.layers.Activation('softmax')})
+modelo = load_model(ruta_modelo_nuevaArq)
 
 # Resumen del modelo
 modelo.summary()
@@ -497,14 +513,14 @@ log_dir = os.path.join(ruta_base_3, 'logs')
 shutil.rmtree(log_dir, ignore_errors=True)
 
 # Preparar el callback para guardar checkpoints
-checkpoint = ModelCheckpoint(f'{ruta_base_3}checkpoint-{{epoch:02d}}.h5',
+checkpoint = ModelCheckpoint(f'{ruta_base_3}checkpoint-{{epoch:02d}}.keras',
                              save_best_only=True,
                              save_weights_only=False,
                              monitor='val_loss',
                              mode='min')
 
 best_model_callback = ModelCheckpoint(
-    filepath=os.path.join(ruta_base_3, 'best_model.h5'),
+    filepath=os.path.join(ruta_base_3, 'best_model.keras'),
     save_best_only=True,
     monitor='val_loss',
     mode='min',
@@ -617,6 +633,8 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6, verbose=1)
 
+
+
 # Optimizar el Data Pipeline
 def prepare_dataset(x, y, batch_size):
     dataset = tf.data.Dataset.from_tensor_slices((x, y))
@@ -637,6 +655,7 @@ history = modelo.fit(
 )
 """
 
+
 # Entrenar el modelo
 history = modelo.fit(
     train_dataset,
@@ -646,11 +665,20 @@ history = modelo.fit(
     callbacks=[early_stopping, reduce_lr, checkpoint, tensorboard_callback, perplexity_callback, lr_scheduler, gradient_norm_callback, best_model_callback]
 )
 
+
 # Guardar el modelo entrenado
-modelo.save(os.path.join(ruta_base_3, 'chatbot_model.h5'))
-modelo.save_weights(os.path.join(ruta_base_3, "pesos_modelo_nuevaArq.h5"))
+modelo.save(os.path.join(ruta_base_3, 'chatbot_model.keras'))
+modelo.save_weights(os.path.join(ruta_base_3, "pesos_modelo_nuevaArq.keras"))
+
 
 # Evaluar el modelo en el conjunto de prueba
 test_dataset = prepare_dataset(x_test, y_test, batch_size=16)
 resultados = modelo.evaluate(x_test, y_test, verbose=1)
 print(f'Pérdida: {resultados[0]}, Precisión: {resultados[1]}')
+
+
+"""
+# Evaluar el modelo en el conjunto de prueba
+resultados = modelo.evaluate(x_test, y_test, verbose=1)
+print(f'Pérdida: {resultados[0]}, Precisión: {resultados[1]}')
+"""
